@@ -5,8 +5,8 @@ import os
 import traceback
 import sqlalchemy
 from PyQt4 import QtCore, QtGui
-from image_edit import Ui_ImageEdit
-from ef_load_data import Ui_LoadPeopleWizard
+from ef.ui.editor import Ui_ImageEdit
+from ef.ui.fetch_wizard import Ui_LoadPeopleWizard
 from ef.db import Session, Person, Photo, setup_session
 from ef.lib import PhotoCache, FindUnsure, DBUpdater, thread_registry
 from ef.fetch import Fetcher
