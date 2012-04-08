@@ -1,0 +1,17 @@
+Actual image size on badges?
+How much wrongness is acceptable?
+Report on bad/unsure images
+Better browsing - sort by opinion, size badness, etc
+Open image in real editor
+Image history
+Filter person list by event
+Show full person record? Certainly link to eventsforce in web browser
+What about police photo approval?
+Eventsforce data model:
+ - type of attendee, not specific to event?
+ - deduplication mess, what do we do?
+ - time of last update?
+Move all database operations into a single thread, sqlite doesn't
+handle concurrency well. Then push updates out into proxy objects in
+the gui thread.
+Run on windows

@@ -2,16 +2,28 @@
 <ui version="4.0">
  <class>LoadPeopleWizard</class>
  <widget class="QWizard" name="LoadPeopleWizard">
+  <property name="windowModality">
+   <enum>Qt::WindowModal</enum>
+  </property>
   <property name="geometry">
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>676</width>
-    <height>446</height>
+    <width>447</width>
+    <height>310</height>
    </rect>
   </property>
   <property name="windowTitle">
    <string>Load data from eventsforce</string>
+  </property>
+  <property name="sizeGripEnabled">
+   <bool>false</bool>
+  </property>
+  <property name="modal">
+   <bool>true</bool>
+  </property>
+  <property name="wizardStyle">
+   <enum>QWizard::ClassicStyle</enum>
   </property>
   <property name="options">
    <set>QWizard::NoBackButtonOnStartPage</set>
@@ -46,12 +58,18 @@
          <property name="text">
           <string>None</string>
          </property>
+         <property name="checked">
+          <bool>false</bool>
+         </property>
         </widget>
        </item>
        <item>
         <widget class="QRadioButton" name="fetch_photos_missing">
          <property name="text">
           <string>Of people with missing or bad photos</string>
+         </property>
+         <property name="checked">
+          <bool>true</bool>
          </property>
         </widget>
        </item>
@@ -96,7 +114,11 @@
        </widget>
       </item>
       <item row="1" column="1">
-       <widget class="QLineEdit" name="ef_password"/>
+       <widget class="QLineEdit" name="ef_password">
+        <property name="echoMode">
+         <enum>QLineEdit::Password</enum>
+        </property>
+       </widget>
       </item>
      </layout>
     </item>

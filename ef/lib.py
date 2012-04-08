@@ -1,6 +1,8 @@
-from PyQt4 import QtCore, QtGui
+from PyQt4 import QtCore, QtGui, QtNetwork
 from collections import OrderedDict, deque
-from efdb import Session, Person, Photo
+from ef.db import Session, Person, Photo
+from ef.netlib import qt_page_get
+import os
 
 max_editing_width = 1200
 max_editing_height = 1600
@@ -9,8 +11,36 @@ class PhotoLoader(QtCore.QObject):
     photo_ready = QtCore.pyqtSignal(int, QtGui.QImage)
     photo_fail = QtCore.pyqtSignal(int, str)
 
+    def __init__(self):
+        QtCore.QObject.__init__(self)
+        self.manager = None
+        self.handlers = {}
+
     @QtCore.pyqtSlot(int, str, QtCore.QSize)
-    def load_image(self, id, filename, scale_size):
+    def load_image(self, id, filename, url, scale_size):
+        if os.path.exists(filename):
+            self.read_image(id, filename, scale_size)
+            return
+
+        if self.manager is None:
+            self.manager = QtNetwork.QNetworkAccessManager()
+
+        reply = qt_page_get(self.manager, url)
+        
+        # The purpose of this hash is to stop the lambda from being
+        # garbage-collected, because python can't see references from
+        # Qt. Otherwise the callback will crash.
+        self.handlers[id] = lambda: self.image_fetched(id, filename, scale_size, reply)
+        reply.finished.connect(self.handlers[id])
+
+    def image_fetched(self, id, filename, scale_size, reply):
+        reply.finished.disconnect(self.handlers[id])
+        f = open(filename, 'w')
+        f.write(reply.readAll())
+        f.close()
+        self.read_image(id, filename, scale_size)
+
+    def read_image(self, id, filename, scale_size):
         reader = QtGui.QImageReader(filename)
         image = reader.read()
 
@@ -74,7 +104,7 @@ class LimitedSizeDict(OrderedDict):
               self.popitem(last=False)
 
 class PhotoCache(QtCore.QObject):
-    start_loading = QtCore.pyqtSignal(int, str, QtCore.QSize)
+    start_loading = QtCore.pyqtSignal(int, str, str, QtCore.QSize)
     
     def __init__(self, limit):
         super(QtCore.QObject, self).__init__()
@@ -90,7 +120,7 @@ class PhotoCache(QtCore.QObject):
 
         self.worker.start()
         
-    def load_image(self, id, filename, ready_cb=None, fail_cb=None, scale_size=QtCore.QSize()):
+    def load_image(self, id, filename, url, ready_cb=None, fail_cb=None, scale_size=QtCore.QSize()):
         if id in self.loading:
             return
 
@@ -102,7 +132,7 @@ class PhotoCache(QtCore.QObject):
             
         self.handlers.setdefault(id, []).append({'ready': ready_cb, 'fail': fail_cb})
         self.loading.add(id)
-        self.start_loading.emit(id, filename, scale_size)
+        self.start_loading.emit(id, filename, url, scale_size)
 
     def _bump_cache_entry(self, id):
         # This bumps an item up to the head of the cache
@@ -146,7 +176,7 @@ class FindUnsureQuerier(QtCore.QObject):
             self.buffer.append(photo.id)
             self.visited.add(photo.id)
 
-    @QtCore.pyqtSlot(int, str, QtCore.QSize)
+    @QtCore.pyqtSlot(int)
     def query_one(self):
         if len(self.buffer) == 0:
             self.run_sql_query()
@@ -186,3 +216,54 @@ class FindUnsure(QtCore.QObject):
             callback(None)
         else:
             callback(Photo.by_id(id))
+
+class DBUpdateWorker(QtCore.QObject):
+    def __init__(self):
+        super(QtCore.QObject, self).__init__()
+
+    @QtCore.pyqtSlot(int, float, float, float)
+    def update_photo_crop(self, id, centre_x, centre_y, scale):
+        photo = Photo.by_id(id)
+        photo.crop_centre_x = centre_x
+        photo.crop_centre_y = centre_y
+        photo.crop_scale = scale
+        Session.commit()
+
+    @QtCore.pyqtSlot(int, str)
+    def update_photo_opinion(self, id, opinion):
+        photo = Photo.by_id(id)
+        photo.opinion = str(opinion)
+        Session.commit()
+
+    @QtCore.pyqtSlot(int, float)
+    def update_photo_rotation(self, id, angle):
+        photo = Photo.by_id(id)
+        photo.rotate = angle
+        Session.commit()
+
+class DBUpdater(QtCore.QObject):
+    sig_update_photo_crop = QtCore.pyqtSignal(int, float, float, float)
+    sig_update_photo_opinion = QtCore.pyqtSignal(int, str)
+    sig_update_photo_rotation = QtCore.pyqtSignal(int, float)
+    
+    def __init__(self):
+        super(QtCore.QObject, self).__init__()
+        
+        self.worker = WorkerThread()
+        self.updater = DBUpdateWorker()
+        self.updater.moveToThread(self.worker)
+
+        self.sig_update_photo_crop.connect(self.updater.update_photo_crop)
+        self.sig_update_photo_opinion.connect(self.updater.update_photo_opinion)
+        self.sig_update_photo_rotation.connect(self.updater.update_photo_rotation)
+        
+        self.worker.start()
+        
+    def update_photo_crop(self, id, centre_x, centre_y, scale):
+        self.sig_update_photo_crop.emit(id, centre_x, centre_y, scale)
+        
+    def update_photo_opinion(self, id, opinion):
+        self.sig_update_photo_opinion.emit(id, opinion)
+        
+    def update_photo_rotation(self, id, angle):
+        self.sig_update_photo_rotation.emit(id, angle)
