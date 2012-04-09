@@ -35,7 +35,7 @@ class PhotoLoader(QtCore.QObject):
 
     def image_fetched(self, id, filename, scale_size, reply):
         reply.finished.disconnect(self.handlers[id])
-        f = open(filename, 'w')
+        f = open(filename, 'wb')
         f.write(reply.readAll())
         f.close()
         self.read_image(id, filename, scale_size)
