@@ -1,23 +1,43 @@
-Actual image size on badges?
-How much wrongness is acceptable?
-Report on bad/unsure images
-Better browsing - sort by opinion, size badness, etc
-Open image in real editor
-Image history
-Filter person list by event
-Show full person record? Certainly link to eventsforce in web browser
-What about police photo approval?
-Eventsforce data model:
- - type of attendee, not specific to event?
- - deduplication mess, what do we do?
- - time of last update?
+High priority
+-------------
 Run on windows
 
+Open image in real editor
+
+Filter person list by event
+
 Ensure all database updates are committed before exit
-EF fetch photos should allow "just this person"
 
 Photos with apostrophe in the url
 
-Creation of tables on initial run
+Error logging
 
 vacuum and backup database on start
+
+Do something with exceptions in the database thread
+
+Photo fetching database logic
+
+Later
+-----
+Report on bad/unsure images
+
+Better browsing - sort by opinion, size badness, etc
+
+Image history
+
+Show full person record? Certainly link to eventsforce in web browser
+
+EF fetch photos should allow "just this person"
+
+Open questions
+--------------
+Actual image size on badges?
+
+How much wrongness is acceptable?
+
+What about police photo approval?
+
+Eventsforce data model:
+ - deduplication mess, what do we do?
+ - time of last update?

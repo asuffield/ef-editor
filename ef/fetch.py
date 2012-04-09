@@ -1,6 +1,6 @@
 from PyQt4 import QtCore, QtGui, QtNetwork
 from ef.lib import WorkerThread
-from ef.db import Person, Photo, Event, Registration, FindPhotos
+from ef.db import Person, Photo, Event, Registration, FindPhotos, Batch
 from ef.parser import EFDelegateParser
 from bs4 import BeautifulSoup
 import traceback
@@ -10,9 +10,10 @@ from ef.netlib import qt_form_post, qt_page_get, qt_reply_charset, qt_readall_ch
 import thread
 
 class PersonDBParser(EFDelegateParser):
-    def __init__(self, progress):
+    def __init__(self, progress, batch):
         EFDelegateParser.__init__(self)
         self.progress = progress
+        self.batch = batch
 
     def handle_person(self, person):
         Person.upsert({'id': person['Person ID'],
@@ -21,13 +22,13 @@ class PersonDBParser(EFDelegateParser):
                        'title': person['Salutation'],
                        'fullname': person['Full Name'],
                        'last_checked_at': time.time(),
-                       })
+                       }, batch=self.batch)
         self.progress.emit('Updated %d people' % len(self.people), 0, 0)
 
     def handle_event(self, event_id, event_name):
         Event.upsert({'id': event_id,
                       'name': event_name,
-                      })
+                      }, batch=self.batch)
 
     def handle_registration(self, person, event_id):
         data = person['events'][event_id]
@@ -38,7 +39,7 @@ class PersonDBParser(EFDelegateParser):
                              'booker_firstname': data['Bookers Firstname'],
                              'booker_lastname': data['Bookers lastname'],
                              'booker_email': data['Bookers Email'],
-                             })
+                             }, batch=self.batch)
 
 def catcherror(func):
     def wrapped(self, *args, **kwargs):
@@ -110,7 +111,8 @@ class ReportTask(FetchTask):
     
     @catcherror
     def run(self):
-        self.parser = PersonDBParser(self.worker.progress)
+        self.batch = Batch()
+        self.parser = PersonDBParser(self.worker.progress, self.batch)
 
         self.worker.progress.emit('Running report', 0, 0)
         reply = qt_page_get(self.worker.manager,
@@ -172,7 +174,12 @@ class ReportTask(FetchTask):
             return
 
         self.parser.close()
-        self.finished.emit()
+        self.batch.finished.connect(self.finished)
+        self.batch.progress.connect(self.handle_commit_progress)
+        self.batch.finish()
+
+    def handle_commit_progress(self, cur, max):
+        self.worker.progress.emit('Saving people', cur, max)
 
     def abort(self):
         if self.run_reply is not None and not self.run_reply.isFinished():

@@ -3,7 +3,7 @@ import weakref
 import time
 from PyQt4 import QtCore, QtSql
 from ef.threads import WorkerThread
-from collections import deque
+from collections import deque, OrderedDict
 
 photodir = None
 
@@ -15,6 +15,9 @@ class DBBaseProxy(QtCore.QObject):
     # Should probably make the origin a set instead of a string...
     update = QtCore.pyqtSignal(dict, str)
 
+class BatchProxy(QtCore.QObject):
+    commit = QtCore.pyqtSignal(int)
+
 class DBException(Exception):
     def __init__(self, msg, query):
         self.msg = msg
@@ -25,57 +28,86 @@ class DBException(Exception):
 class DBWorker(QtCore.QObject):
     created = QtCore.pyqtSignal(str, dict, str)
     updated = QtCore.pyqtSignal(str, dict, str)
+    pending = QtCore.pyqtSignal(int)
 
     # In order to improve application performance and decrease the
     # number of spurious database operations, we batch updates
     # together before shipping them off to the database. An update
-    # goes into self.update_queue initially, and any further updates
-    # get applied to the object stored there. When the timer ticks, we
-    # write out the queue to the database.
+    # goes into self.write_cache initially, and any
+    # further updates get applied to the object stored there. When the
+    # timer ticks, we write out the queue to the database.
 
-    # Note that we don't do this for upsert or insert, only
-    # update. This is because updates happen at high frequency due to
-    # UI operations, while the other operations are only used on
-    # fetching from eventsforce
-    
     def __init__(self):
         QtCore.QObject.__init__(self)
 
         self.binds = {}
-        self.update_queue = {}
+        self.batches = {}
+        self.write_cache = OrderedDict()
 
     @QtCore.pyqtSlot()
     def setup(self):
-        self.timer = QtCore.QTimer(self)
-        self.timer.setInterval(300)
-        self.timer.timeout.connect(self.timeout)
-        self.timer.start()
+        self.ticker = QtCore.QTimer(self)
+        self.ticker.setInterval(300)
+        self.ticker.timeout.connect(self.timeout)
+        self.ticker.start()
 
     def timeout(self):
-        for table in self.update_queue:
-            for key in self.update_queue[table]:
-                queued = self.update_queue[table][key]
-                self.do_update(table, queued['key_fields'], queued['values'], queued['origin'])
-        self.update_queue = {}
-        
+        timer = QtCore.QElapsedTimer()
+        timer.start()
+
+        # Do all updates/inserts in batched transactions for (much) better performance
+        batches = {}
+        db = QtSql.QSqlDatabase.database()
+        db.transaction()
+        try:
+            while self.write_cache and not timer.hasExpired(200):
+                k, queued = self.write_cache.popitem(last=False)
+                table,key = k
+                if queued['upsert']:
+                    self.do_upsert(table,queued['key_fields'], queued['values'], queued['origin'])
+                else:
+                    self.do_update(table,queued['key_fields'], queued['values'], queued['origin'])
+                for k,v in queued['batches'].iteritems():
+                    batches[k] = v + batches.get(k, 0)
+            db.commit()
+        except:
+            db.rollback()
+            raise
+
+        for k, v in batches.iteritems():
+            if self.batches.has_key(k):
+                proxy = self.batches[k]['proxy']()
+                if proxy is None:
+                    del self.batches[k]
+                else:
+                    proxy.commit.emit(v)
+
         # Remove all invalidated weak references
         for x in self.binds.itervalues():
             for bindings in x.itervalues():
                 bindings = filter(lambda binding: binding['proxy']() is not None, bindings)
 
+        self.pending.emit(len(self.write_cache))
+
     def get_binds(self, table, key):
         k = tuple(sorted(key.items()))
-        return self.binds.setdefault(table, {}).setdefault(k, [])
+        return self.binds.setdefault(str(table), {}).setdefault(k, [])
 
     def get_queued_update(self, table, key):
-        k = tuple(sorted(key.items()))
-        return self.update_queue.setdefault(table, {}).setdefault(k, {'values': {}, 'origin': set()})
+        k = (table, tuple(sorted(key.items())))
+        queued = self.write_cache.setdefault(k, {'key_fields': None, 'values': {}, 'origin': set(), 'upsert': False, 'batches': {}})
+        self.pending.emit(len(self.write_cache))
+        return queued
 
     @QtCore.pyqtSlot(str, list, dict, DBBaseProxy)
     def bind(self, table, fields, key, proxy):
         binding = {'fields': fields, 'proxy': weakref.ref(proxy)}
         self.get_binds(table, key).append(binding)
         self.fetch(table, fields, key, binding)
+
+    @QtCore.pyqtSlot(int, BatchProxy)
+    def register_batch(self, key, proxy):
+        self.batches[key] = {'proxy': weakref.ref(proxy)}
 
     def key_expr(self, key):
         return ' and '.join(map(lambda k: '%s = :%s' % (k,k), key))
@@ -116,14 +148,25 @@ class DBWorker(QtCore.QObject):
             self.created.emit(table, key, 'signal_existing')
         query.finish()
 
-    @QtCore.pyqtSlot(str, list, dict, str)
-    def update(self, table, key_fields, values, origin):
+    @QtCore.pyqtSlot(str, list, dict, str, int)
+    def update(self, table, key_fields, values, origin, batchid):
+        key = dict([(k,values[k]) for k in key_fields])
+        queued = self.get_queued_update(table, key)
+        queued['key_fields'] = key_fields
+        queued['values'].update(values)
+        queued['batches'][batchid] = 1 + queued['batches'].get(batchid, 0)
+        queued['origin'].add(origin)
+
+    @QtCore.pyqtSlot(str, list, dict, str, int)
+    def upsert(self, table, key_fields, values, origin, batchid):
         key = dict([(k,values[k]) for k in key_fields])
         queued = self.get_queued_update(table, key)
         queued['key_fields'] = key_fields
         queued['values'].update(values)
         queued['origin'].add(origin)
-    
+        queued['batches'][batchid] = 1 + queued['batches'].get(batchid, 0)
+        queued['upsert'] = True
+
     def do_update(self, table, key_fields, values, origin):
         # Note that QtSql won't let us use the same name twice, so we can't include key_fields in value_fields
         value_fields = set(values) - set(key_fields)
@@ -147,36 +190,28 @@ class DBWorker(QtCore.QObject):
 
         for o in origin:
             self.updated.emit(table, key, o)
+        
+    def do_upsert(self, table, key_fields, values, origin):
+        query = QtSql.QSqlQuery()
+        stmt = 'select %s from %s where %s' % (','.join(key_fields), table, self.key_expr(key_fields))
+        if not query.prepare(stmt):
+            raise DBException("Prepare failed!", query)
+        for k in key_fields:
+            query.bindValue(':%s' % k, values[k])
+        query.setForwardOnly(True)
+        if not query.exec_():
+            raise DBException("Query failed!", query)
+        if query.next():
+            self.do_update(table, key_fields, values, origin)
+        else:
+            self.do_insert(table, key_fields, values, origin)
+        query.finish()
 
-    @QtCore.pyqtSlot(str, list, dict, str)
-    def upsert(self, table, key_fields, values, origin):
-        db = QtSql.QSqlDatabase.database()
-        db.transaction()
-        try:
-            query = QtSql.QSqlQuery()
-            stmt = 'select %s from %s where %s' % (','.join(key_fields), table, self.key_expr(key_fields))
-            if not query.prepare(stmt):
-                raise DBException("Prepare failed!", query)
-            for k in key_fields:
-                query.bindValue(':%s' % k, values[k])
-            query.setForwardOnly(True)
-            if not query.exec_():
-                raise DBException("Query failed!", query)
-            if query.next():
-                self.do_update(table, key_fields, values, [origin])
-            else:
-                self.insert(table, key_fields, values, origin)
-            query.finish()
-            db.commit()
-        except:
-            db.rollback()
-            raise
-
-    @QtCore.pyqtSlot(str, dict, str)
-    def insert(self, table, key_fields, values, str):
+    def do_insert(self, table, key_fields, values, origin):
         query = QtSql.QSqlQuery()
         keys = values.keys()
-        query.prepare('insert into %s (%s) values (%s) returning id' % (table, ','.join(keys), ','.join(map(lambda k: ':' + k), keys)))
+        if not query.prepare('insert into %s (%s) values (%s)' % (table, ','.join(keys), ','.join(map(lambda k: ':' + k, keys)))):
+            raise DBException("Prepare failed!", query)
         for k, v in values.iteritems():
             query.bindValue(':%s' % k, v)
         query.setForwardOnly(True)
@@ -189,7 +224,8 @@ class DBWorker(QtCore.QObject):
             raise DBException("Failed to find row just inserted?!", query)
 
         key = dict([(key_fields[i],query.value(i)) for i in xrange(0, len(key_fields))])
-        self.created.emit(table, key, origin)
+        for o in origin:
+            self.created.emit(table, key, o)
 
     # This is a hideous abstraction violation, but it's better than
     # building an elaborate infrastructure just to support this one
@@ -199,8 +235,8 @@ class DBWorker(QtCore.QObject):
     # that we need logic inside the transaction, hence we need logic
     # in the db thread... and if the logic has to be shoved somewhere,
     # why not here?
-    @QtCore.pyqtSlot(int, str)
-    def fetched_photo(self, person_id, url):
+    @QtCore.pyqtSlot(int, str, int)
+    def fetched_photo(self, person_id, url, batchid):
         db = QtSql.QSqlDatabase.database()
         db.transaction()
         try:
@@ -211,7 +247,7 @@ class DBWorker(QtCore.QObject):
                                                  'date_fetched': time.time(),
                                                  }, ['fetched_photo'])
             else:
-                self.insert('photo', ['id'], {'url' : url,
+                self.do_insert('photo', ['id'], {'url' : url,
                                               'date_fetched' : time.time(),
                                               'person_id' : person_id,
                                               'crop_centre_x' : 0.5,
@@ -219,7 +255,7 @@ class DBWorker(QtCore.QObject):
                                               'crop_scale' : 1,
                                               'rotate' : 0,
                                               'opinion' : 'unsure',
-                                              }, 'fetched_photo')
+                                              }, ['fetched_photo'])
                 id = self.find_photo(person_id, url)
 
             self.do_update('person', ['id'], {'id': person_id,
@@ -238,7 +274,7 @@ class DBWorker(QtCore.QObject):
         query.setForwardOnly(True)
         query.exec_()
         if query.next():
-            id = query.value(0)
+            id, ok = query.value(0).toInt()
         else:
             id = None
         query.finish()
@@ -246,14 +282,14 @@ class DBWorker(QtCore.QObject):
 
 class DBManager(QtCore.QObject):
     sig_bind = QtCore.pyqtSignal(str, list, dict, DBBaseProxy)
-    sig_update = QtCore.pyqtSignal(str, list, dict, str)
-    sig_upsert = QtCore.pyqtSignal(str, list, dict, str)
-    sig_insert = QtCore.pyqtSignal(str, list, dict, str)
-    sig_fetched_photo = QtCore.pyqtSignal(int, str)
+    sig_update = QtCore.pyqtSignal(str, list, dict, str, int)
+    sig_upsert = QtCore.pyqtSignal(str, list, dict, str, int)
+    sig_fetched_photo = QtCore.pyqtSignal(int, str, int)
+    sig_register_batch = QtCore.pyqtSignal(int, BatchProxy)
     sig_signal_existing_created = QtCore.pyqtSignal(str, list)
 
     created = QtCore.pyqtSignal(str, dict)
-    updated = QtCore.pyqtSignal(str, dict)    
+    updated = QtCore.pyqtSignal(str, dict)
     
     def __init__(self):
         super(QtCore.QObject, self).__init__()
@@ -265,35 +301,44 @@ class DBManager(QtCore.QObject):
         self.sig_bind.connect(self.dbworker.bind)
         self.sig_update.connect(self.dbworker.update)
         self.sig_upsert.connect(self.dbworker.upsert)
-        self.sig_insert.connect(self.dbworker.insert)
         self.sig_fetched_photo.connect(self.dbworker.fetched_photo)
+        self.sig_register_batch.connect(self.dbworker.register_batch)
         self.sig_signal_existing_created.connect(self.dbworker.signal_existing_created)
         self.dbworker.updated.connect(self.updated)
         self.dbworker.created.connect(self.created)
+        self.dbworker.pending.connect(self.handle_pending)
         self.worker.started.connect(self.dbworker.setup)
+
+        self.pending_op_count = 0
 
     def start(self):
         self.worker.start()
+
+    def handle_pending(self, count):
+        self.pending_op_count = count
+
+    def pending(self):
+        return self.pending_op_count
 
     # Wrappers to hide the Qt noise
 
     def bind(self, table, fields, key, signal):
         self.sig_bind.emit(table, fields, key, signal)
 
-    def update(self, table, key_fields, values, origin):
-        self.sig_update.emit(table, key_fields, values, origin)
+    def register_batch(self, key, batch):
+        self.sig_register_batch.emit(key, batch)
 
-    def upsert(self, table, key_fields, values, origin):
-        self.sig_upsert.emit(table, key_fields, values, origin)
+    def update(self, table, key_fields, values, origin, batchid):
+        self.sig_update.emit(table, key_fields, values, origin, batchid)
 
-    def insert(self, table, key_fields, values, origin):
-        self.sig_insert.emit(table, key_fields, values, origin)
+    def upsert(self, table, key_fields, values, origin, batchid):
+        self.sig_upsert.emit(table, key_fields, values, origin, batchid)
 
     def signal_existing_created(self, table, key_fields):
         self.sig_signal_existing_created.emit(table, key_fields)
 
-    def fetched_photo(self, person_id, url):
-        self.sig_fetched_photo.emit(person_id, url)
+    def fetched_photo(self, person_id, url, batchid):
+        self.sig_fetched_photo.emit(person_id, url, batchid)
 
 dbmanager = DBManager()
 
@@ -310,6 +355,8 @@ class DBBase(QtCore.QObject):
             key[k] = v
 
         self.__proxy = DBBaseProxy()
+        # proxies don't have any methods so this doesn't really matter...
+        self.__proxy.moveToThread(dbmanager.worker)
         self.__proxy.update.connect(self._do_update)
         dbmanager.bind(self.__tablename__, self.__fields__.keys(), key, self.__proxy)
 
@@ -333,18 +380,21 @@ class DBBase(QtCore.QObject):
                 raise KeyError("Key field %s missing from values" % k)
 
     @classmethod
-    def insert(self, values):
-        self._check_values(values)
-        dbmanager.insert(self.__tablename__, self.__key__, values)
+    def batch_op(self, batch):
+        if batch is None:
+            return 0
+        else:
+            batch.add_op()
+            return id(batch)
 
-    def update(self, values, origin=''):
+    def update(self, values, origin='', batch=None):
         self._check_values(values)
-        dbmanager.update(self.__tablename__, self.__key__, values, origin)
+        dbmanager.update(self.__tablename__, self.__key__, values, origin, self.batch_op(batch))
 
     @classmethod
-    def upsert(self, values, origin=''):
+    def upsert(self, values, origin='', batch=None):
         self._check_values(values)
-        dbmanager.upsert(self.__tablename__, self.__key__, values, origin)
+        dbmanager.upsert(self.__tablename__, self.__key__, values, origin, self.batch_op(batch))
 
     @classmethod
     def signal_existing_created(self):
@@ -412,8 +462,8 @@ class Photo(DBBase):
                      }, origin)
 
     @classmethod
-    def fetched(self, person_id, url):
-        dbmanager.fetched_photo(person_id, url)
+    def fetched(self, person_id, url, batch=None):
+        dbmanager.fetched_photo(person_id, url, self.batch_op(batch))
 
 class Person(DBBase):
     __tablename__ = 'person'
@@ -511,9 +561,10 @@ class FindPhotosWorker(QtCore.QObject):
     @QtCore.pyqtSlot()
     def run(self):
         if self.which == 'missing':
-            query = QtSql.QSqlQuery("""select person.id from person left outer join photo on person.current_photo_id = photo.id where person.current_photo_id is null or photo.opinion = 'bad'""")
+            query = QtSql.QSqlQuery("""select person.id from person left outer join photo on person.current_photo_id = photo.id where person.current_photo_id is null or photo.opinion = 'bad'
+                                       order by person.lastname, person.firstname, person.id""")
         else:
-            query = QtSql.QSqlQuery("""select person.id from person""")
+            query = QtSql.QSqlQuery("""select person.id from person order by person.lastname, person.firstname, person.id""")
         ids = []
         while query.next():
             id, ok = query.value(0).toInt()
@@ -535,6 +586,42 @@ class FindPhotos(QtCore.QObject):
 
     def run(self):
         self.sig_run.emit()
+
+class Batch(QtCore.QObject):
+    finished = QtCore.pyqtSignal()
+    progress = QtCore.pyqtSignal(int, int)
+
+    def __init__(self):
+        QtCore.QObject.__init__(self)
+
+        self.batch_proxy = BatchProxy()
+        self.batch_proxy.moveToThread(dbmanager.worker)
+        self.batch_proxy.commit.connect(self.handle_commit)
+        dbmanager.register_batch(id(self), self.batch_proxy)
+
+        self.ops_started = 0
+        self.ops_committed = 0
+        self.finish_called = False
+
+    def add_op(self):
+        if self.finish_called:
+            raise Exception('op added to Batch after finish() called')
+        self.ops_started = self.ops_started + 1
+
+    def handle_commit(self, ops):
+        self.ops_committed = self.ops_committed + ops
+        if self.ops_committed > self.ops_started:
+            raise Exception('Batch has more ops started than committed')
+        self.progress.emit(self.ops_committed, self.ops_started)
+        self.check_for_finished()
+
+    def finish(self):
+        self.finish_called = True
+        self.check_for_finished()
+
+    def check_for_finished(self):
+        if self.finish_called and self.ops_started == self.ops_committed:
+            self.finished.emit()
 
 def setup_session(datadir):
     global engine, photodir

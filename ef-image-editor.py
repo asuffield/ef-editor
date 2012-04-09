@@ -63,6 +63,7 @@ class ImageListItem(QtGui.QStandardItem):
             self.photo.updated.disconnect(self.photo_updated)
         self.photo = Photo(self.person.current_photo_id)
         self.photo.updated.connect(self.photo_updated)
+        self.photo_cannot_load = False
         self.emitDataChanged()
 
     def photo_updated(self, origin):
