@@ -4,3 +4,5 @@
 *.pyc
 *.png
 /ef/ui/*
+dist/
+build/
