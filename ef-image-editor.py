@@ -3,21 +3,23 @@
 import sys
 import os
 import traceback
-import sqlalchemy
 from PyQt4 import QtCore, QtGui
 from ef.ui.editor import Ui_ImageEdit
 from ef.ui.fetch_wizard import Ui_LoadPeopleWizard
-from ef.db import Session, Person, Photo, setup_session
-from ef.lib import PhotoCache, FindUnsure, DBUpdater, thread_registry
+from ef.db import Person, Photo, setup_session, FindUnsure, dbmanager
+from ef.lib import PhotoCache
 from ef.fetch import Fetcher
+from ef.threads import thread_registry
 from collections import deque
 from datetime import datetime
 
 class ImageListItem(QtGui.QStandardItem):
-    def __init__(self, photo_cache, person):
+    def __init__(self, photo_cache, person_id):
         QtGui.QStandardItem.__init__(self)
 
-        self.person = person
+        self.person = Person(person_id)
+        self.person.updated.connect(self.person_updated)
+        self.photo = None
         self.photo_cache = photo_cache
         self.photo_cannot_load = False
 
@@ -28,7 +30,7 @@ class ImageListItem(QtGui.QStandardItem):
 
     def data(self, role):
         if role == QtCore.Qt.DecorationRole:
-            return self.photo()
+            return self.get_photo()
 
         if role == QtCore.Qt.DisplayRole:
             return self.person.fullname
@@ -50,10 +52,22 @@ class ImageListItem(QtGui.QStandardItem):
 
         return None
 
-    def db_expire(self):
-        if self.person.current_photo is not None:
-            Session.expire(self.person.current_photo)
-        Session.expire(self.person)
+    def person_updated(self, origin):
+        if origin == 'CropFrame':
+            return
+        if self.person.current_photo_id is None:
+            return
+        if self.photo is not None and self.photo.id == self.person.current_photo_id:
+            return
+        if self.photo is not None:
+            self.photo.updated.disconnect(self.photo_updated)
+        self.photo = Photo(self.person.current_photo_id)
+        self.photo.updated.connect(self.photo_updated)
+        self.emitDataChanged()
+
+    def photo_updated(self, origin):
+        if origin == 'CropFrame':
+            return
         self.photo_cannot_load = False
         self.emitDataChanged()
 
@@ -64,11 +78,11 @@ class ImageListItem(QtGui.QStandardItem):
         self.photo_cannot_load = True
         self.emitDataChanged()
 
-    def photo(self):
-        if self.photo_cannot_load or self.person.current_photo is None:
+    def get_photo(self):
+        if self.photo_cannot_load or self.photo is None:
             return None
 
-        pixmap = self.photo_cache.peek_image(self.person.current_photo.id)
+        pixmap = self.photo_cache.peek_image(self.photo.id)
         if pixmap is not None:
             return pixmap
 
@@ -79,23 +93,22 @@ class ImageListItem(QtGui.QStandardItem):
         # (There's a bug here in the pathological case where we cycle
         # through loading more images than the cache can fit - screw it)
         
-        self.photo_cache.load_image(self.person.current_photo.id,
-                                    self.person.current_photo.full_path(),
-                                    self.person.current_photo.url,
+        self.photo_cache.load_image(self.photo.id,
+                                    self.photo.full_path(),
+                                    self.photo.url,
                                     ready_cb=self.handle_photo_ready,
                                     fail_cb=self.handle_photo_fail,
                                     scale_size=self.thumbnail_size)
         return None
 
 class CropFrame(QtGui.QGraphicsRectItem):
-    def __init__(self, main_pixmap, output_updated, dbupdater):
+    def __init__(self, main_pixmap, output_updated):
         super(QtGui.QGraphicsRectItem, self).__init__(0, 0, 0, 0, main_pixmap)
 
         self.hide()
 
         self.main_pixmap = main_pixmap
         self.output_updated = output_updated
-        self.dbupdater = dbupdater
         self.photo = None
 
         self.scale_factor = 1.0
@@ -139,7 +152,7 @@ class CropFrame(QtGui.QGraphicsRectItem):
         x = self.x()
         y = self.y()
 
-        self.dbupdater.update_photo_crop(self.photo.id, x / self.image_width, y / self.image_height, self.scale_factor)
+        self.photo.update_crop(x / self.image_width, y / self.image_height, self.scale_factor, 'CropFrame')
 
     def update_rect(self):
         self.scaled_width = self.crop_width*self.scale_factor
@@ -227,11 +240,11 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         self.back.setDisabled(True)
         self.forwards.setDisabled(True)
 
-        self.dbupdater = DBUpdater()
         self.list_photo_cache = PhotoCache(100)
         self.main_photo_cache = PhotoCache(10)
         self.unsure = FindUnsure()
         self.fetcher = Fetcher()
+        self.current_person = None
         self.current_photo = None
         self.current_pixmap = None
         self.loading_now = False
@@ -251,27 +264,25 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         self.main_pixmap = EditPixmap(self.wheel_event)
         self.edit_scene.addItem(self.main_pixmap)
 
-        self.crop_frame = CropFrame(self.main_pixmap, self.output_updated, self.dbupdater)
+        self.crop_frame = CropFrame(self.main_pixmap, self.output_updated)
 
         self.main_pixmap.setZValue(1)
         self.crop_frame.setZValue(2)
 
-        self.session = Session()
-
         self.person_model = QtGui.QStandardItemModel(self)
         self.person_model_proxy = QtGui.QSortFilterProxyModel(self)
         self.person_model_proxy.setSourceModel(self.person_model)
-        self.personList.setModel(self.person_model_proxy)
-
-        for p in self.session.query(Person).filter(Person.current_photo!=None).all():
-            self.image_list_items[p.id] = ImageListItem(self.list_photo_cache, p)
-            self.person_model.appendRow(self.image_list_items[p.id])
-
         self.person_model_proxy.setDynamicSortFilter(True)
         self.person_model_proxy.setFilterCaseSensitivity(False)
         self.person_model_proxy.setSortCaseSensitivity(False)
         self.person_model_proxy.setSortRole(QtCore.Qt.UserRole+1)
         self.person_model_proxy.sort(0)
+
+        self.personList.setModel(self.person_model_proxy)
+        self.person_model.itemChanged.connect(self.handle_model_item_changed)
+
+        dbmanager.created.connect(self.handle_db_created)
+        Person.signal_existing_created()
 
         self.personList.selectionModel().currentChanged.connect(self.handle_select)
         self.output_updated.connect(self.handle_crop)
@@ -290,9 +301,6 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         self.fetcher.completed.connect(self.handle_fetch_completed)
         self.fetcher.error.connect(self.handle_fetch_error)
         self.fetcher.progress.connect(self.handle_fetch_progress)
-        self.fetcher.updated_person.connect(self.handle_fetch_person)
-        self.fetcher.updated_photo.connect(self.handle_fetch_photo)
-        self.fetcher.updated_event.connect(self.handle_fetch_event)
         self.rotate.valueChanged.connect(self.handle_rotate)
         self.rotate_0.clicked.connect(lambda: self.rotate.setValue(0))
         self.rotate_l90.clicked.connect(lambda: self.rotate.setValue(-90))
@@ -358,6 +366,7 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         self.status_expiry_timer.start()
 
     def clear_image(self):
+        self.current_person = None
         self.current_photo = None
         self.current_pixmap = None
         self.crop_frame.hide()
@@ -410,23 +419,30 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
 
         self.load_person(current.data(QtCore.Qt.UserRole))
 
+    def handle_model_item_changed(self, item):
+        # If this item is the currently selected item...
+        if self.person_model_proxy.mapFromSource(item.index()) == self.personList.selectionModel().currentIndex():
+            # ...then just reload the person
+            self.load_person(item.data(QtCore.Qt.UserRole))
+
     """Load this person's photo into the editor"""
     def load_person(self, id):
-        p = Person.by_id(id)
+        p = self.image_list_items[id].person
+        photo = self.image_list_items[id].photo
 
         # Suppress history updates when changing the item with
         # back/forwards, because they have special handling
-        if not self.suppress_history and self.current_photo is not None and self.current_photo.person.id != id:
-            self.history_back.append(self.current_photo.person.id)
+        if not self.suppress_history and self.current_photo is not None and self.current_person.id != id:
+            self.history_back.append(self.current_person.id)
             self.back.setDisabled(False)
             self.history_forwards.clear()
             self.forwards.setDisabled(True)
             while len(self.history_back) > 10:
                 self.history_back.popleft()
 
-        photo = p.current_photo
         if photo is not None:
             self.clear_image()
+            self.current_person = p
             self.current_photo = photo
             self.person_name.setText(u'Loading %s...' % p)
 
@@ -452,8 +468,8 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
             self.load_person(id)
 
     def handle_back(self):
-        if self.current_photo is not None:
-            self.history_forwards.append(self.current_photo.person.id)
+        if self.current_person is not None:
+            self.history_forwards.append(self.current_person.id)
             self.forwards.setDisabled(False)
         if len(self.history_back) > 0:
             id = self.history_back.pop()
@@ -464,8 +480,8 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
             self.back.setDisabled(True)
 
     def handle_forwards(self):
-        if self.current_photo is not None:
-            self.history_back.append(self.current_photo.person.id)
+        if self.current_person is not None:
+            self.history_back.append(self.current_person.id)
             self.back.setDisabled(False)
         if len(self.history_forwards) > 0:
             id = self.history_forwards.pop()
@@ -477,7 +493,7 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
 
     def handle_photo_fail(self, id, error):
         if self.current_photo is not None and self.current_photo.id == id:
-            text = u'Failed to load %s: %s' % (self.current_photo.person, error)
+            text = u'Failed to load %s: %s' % (self.current_person, error)
             self.clear_image()
             self.person_name.setText(text)
 
@@ -510,7 +526,7 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         self.edit_scene.setSceneRect(0, 0, width, height)
         self.crop_frame.setup_new_image(width, height, self.current_photo)
         self.main_pixmap.show()
-        self.person_name.setText(unicode(self.current_photo.person))
+        self.person_name.setText(unicode(self.current_person))
         self.main_image.fitInView(self.main_pixmap, QtCore.Qt.KeepAspectRatio)
 
         opinion = self.current_photo.opinion
@@ -532,7 +548,7 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         if self.current_photo is None:
             return
 
-        self.dbupdater.update_photo_opinion(self.current_photo.id, state)
+        self.current_photo.update_opinion(state)
 
     def handle_opinion_ok(self):
         self._handle_opinion('ok')
@@ -546,18 +562,18 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
     def handle_rotate(self, angle):
         if self.current_pixmap is not None and not self.loading_now:
             self.setup_photo()
-            self.dbupdater.update_photo_rotation(self.current_photo.id, angle)
+            self.current_photo.update_rotation(angle)
 
     def handle_next_unsure(self):
         self.next_unchecked.setDisabled(True)
         self.unsure.next(self.handle_unsure_result)
 
-    def handle_unsure_result(self, photo):
-        if photo is None:
+    def handle_unsure_result(self, person_id):
+        if person_id is None:
             self.clear_image()
             self.person_name.setText("End of unsure photos")
         else:
-            self.jump_to_person(photo.person.id)
+            self.jump_to_person(person_id)
 
     def handle_crop(self):
         if self.loading_now:
@@ -607,43 +623,26 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         self.status_start(text, max)
         self.progress.setValue(cur)
 
-    def handle_fetch_person(self, id):
-        item = self.image_list_items.get(id)
-        if item is None:
-            p = Person.by_id(id)
-            self.image_list_items[p.id] = ImageListItem(self.list_photo_cache, p)
-            self.person_model.appendRow(self.image_list_items[p.id])
-        else:
-            item.db_expire()
-
-    def handle_fetch_photo(self, id):
-        if self.current_photo is not None and self.current_photo.person.id == id:
-            self.load_person(id)
-        item = self.image_list_items.get(id)
-        if item is not None:
-            item.db_expire()
-
-    def handle_fetch_event(self, id):
-        pass
+    def handle_db_created(self, table, key):
+        if table == 'person':
+            # This abstraction is very leaky - can't preserve type information through ef.db
+            id, ok = key['id'].toInt()
+            item = self.image_list_items[id] = ImageListItem(self.list_photo_cache, id)
+            self.person_model.appendRow(item)
 
 def setup():
-    #import logging
-
-    #logging.basicConfig()
-    #logging.getLogger('sqlalchemy.engine').setLevel(logging.INFO)
-    
-    datadir = QtGui.QDesktopServices.storageLocation(QtGui.QDesktopServices.DataLocation) + '/asuffield.me.uk/ef-image-editor/'
+    datadir = QtGui.QDesktopServices.storageLocation(QtGui.QDesktopServices.DataLocation)
     dir = QtCore.QDir()
     if not dir.exists(datadir):
         dir.mkpath(datadir)
     setup_session(str(datadir))
  
 if __name__ == "__main__":
-    setup()
     QtCore.QCoreApplication.setOrganizationName('asuffield.me.uk')
     QtCore.QCoreApplication.setOrganizationDomain('asuffield.me.uk')
     QtCore.QCoreApplication.setApplicationName('ef-image-editor')
     app = QtGui.QApplication(sys.argv)
+    setup()
     myapp = ImageEdit()
     myapp.show()
     rc = app.exec_()

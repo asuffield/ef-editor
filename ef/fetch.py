@@ -1,67 +1,44 @@
 from PyQt4 import QtCore, QtGui, QtNetwork
 from ef.lib import WorkerThread
-from ef.db import Session, Person, Photo, Event, Registration
+from ef.db import Person, Photo, Event, Registration, FindPhotos
 from ef.parser import EFDelegateParser
-import urllib
-import mechanize
-import cookielib
 from bs4 import BeautifulSoup
 import traceback
-from datetime import datetime
+import time
 from ef.netlib import qt_form_post, qt_page_get, qt_reply_charset, qt_readall_charset, qt_relative_url
-from sqlalchemy import and_, or_
 
 import thread
 
 class PersonDBParser(EFDelegateParser):
-    def __init__(self, update, update_event, progress):
+    def __init__(self, progress):
         EFDelegateParser.__init__(self)
-        self.update = update
-        self.update_event = update_event
         self.progress = progress
-        self.session = Session()
 
     def handle_person(self, person):
-        p = Person.by_id(person['Person ID'], self.session)
-        if p is None:
-            p = Person(person['Person ID'])
-            self.session.add(p)
-        p.firstname = person['Firstname']
-        p.lastname = person['Lastname']
-        p.fullname = person['Full Name']
-        p.title = person['Salutation']
-        p.last_checked_at = datetime.now()
-
-        self.session.commit()
+        Person.upsert({'id': person['Person ID'],
+                       'firstname': person['Firstname'],
+                       'lastname': person['Lastname'],
+                       'title': person['Salutation'],
+                       'fullname': person['Full Name'],
+                       'last_checked_at': time.time(),
+                       })
         self.progress.emit('Updated %d people' % len(self.people), 0, 0)
-        self.update.emit(p.id)
 
     def handle_event(self, event_id, event_name):
-        e = Event.by_id(event_id, self.session)
-        if e is None:
-            e = Event(event_id, event_name)
-            self.session.add(e)
-        e.name = event_name
-
-        self.session.commit()
-        self.update_event.emit(event_id)
+        Event.upsert({'id': event_id,
+                      'name': event_name,
+                      })
 
     def handle_registration(self, person, event_id):
-        r = self.session.query(Registration).filter_by(person_id=person['Person ID'], event_id=event_id).first()
-        if r is None:
-            p = Person.by_id(person['Person ID'], self.session)
-            e = Event.by_id(event_id, self.session)
-            r = Registration(p, e)
-            self.session.add(r)
         data = person['events'][event_id]
-        r.attendee_type = data['Type of Attendee']
-        r.booking_ref = data['Booking Ref']
-        r.booker_firstname = data['Bookers Firstname']
-        r.booker_lastname = data['Bookers lastname']
-        r.booker_email = data['Bookers Email']
-
-        self.session.commit()
-        self.update.emit(r.person.id)
+        Registration.upsert({'person_id': person['Person ID'],
+                             'event_id': event_id,
+                             'attendee_type': data['Type of Attendee'],
+                             'booking_ref': data['Booking Ref'],
+                             'booker_firstname': data['Bookers Firstname'],
+                             'booker_lastname': data['Bookers lastname'],
+                             'booker_email': data['Bookers Email'],
+                             })
 
 def catcherror(func):
     def wrapped(self, *args, **kwargs):
@@ -133,7 +110,7 @@ class ReportTask(FetchTask):
     
     @catcherror
     def run(self):
-        self.parser = PersonDBParser(self.worker.updated_person, self.worker.updated_event, self.worker.progress)
+        self.parser = PersonDBParser(self.worker.progress)
 
         self.worker.progress.emit('Running report', 0, 0)
         reply = qt_page_get(self.worker.manager,
@@ -213,13 +190,14 @@ class PhotosTask(FetchTask):
 
     @catcherror
     def run(self):
-        self.session = Session()
-        
-        query = self.session.query(Person)
-        if self.which == 'missing':
-            query = query.outerjoin(Photo, Photo.id == Person.current_photo_id).filter(or_(Person.current_photo==None, Photo.opinion=='bad'))
+        self.find_photos = FindPhotos(self.which)
+        self.find_photos.results.connect(self.photos_ready)
+        self.find_photos.run()
+        self.worker.progress.emit('Finding photos', 0, 0)
 
-        self.people = list(query.all())
+    @catcherror
+    def photos_ready(self, ids):
+        self.people = ids
         self.worker.progress.emit('Finding photos', 0, len(self.people))
         self.i = 0
         self.run_person()
@@ -229,9 +207,8 @@ class PhotosTask(FetchTask):
             self.finished.emit()
             return
 
-        p = self.people[self.i]
         reply = qt_page_get(self.worker.manager,
-                            'https://www.eventsforce.net/libdems/backend/home/codEditMain.csp?codReadOnly=1&personID=%d&curPage=1' % p.id)
+                            'https://www.eventsforce.net/libdems/backend/home/codEditMain.csp?codReadOnly=1&personID=%d&curPage=1' % self.people[self.i])
         reply.finished.connect(self.get_finished)
         self.get_reply = reply
 
@@ -245,23 +222,8 @@ class PhotosTask(FetchTask):
 
         img = soup.find('img', title='Picture Profile')
         if img is not None:
-            p = self.people[self.i]
-            updated_person = False
             url = str(qt_relative_url(self.get_reply, img['src']).toString())
-            photo = self.session.query(Photo).filter_by(person_id=p.id).filter_by(url=url).first()
-            if photo is None:
-                photo = Photo(p)
-                self.session.add(photo)
-            photo.url = url
-            photo.date_fetched = datetime.now()
-            if p.current_photo is None or p.current_photo.id != photo.id:
-                p.current_photo = photo
-                updated_person = True
-
-            self.session.commit()
-            self.worker.updated_photo.emit(photo.id)
-            if updated_person:
-                self.worker.updated_person.emit(p.id)
+            Photo.fetched(self.people[self.i], url)
         self.worker.progress.emit('Finding photos', self.i, len(self.people))
 
         self.i = self.i + 1
@@ -272,14 +234,10 @@ class PhotosTask(FetchTask):
             self.get_reply.finished.disconnect()
             self.get_reply.abort()
 
-
 class FetchWorker(QtCore.QObject):
     completed = QtCore.pyqtSignal()
     error = QtCore.pyqtSignal(str)
     progress = QtCore.pyqtSignal(str, int, int)
-    updated_person = QtCore.pyqtSignal(int)
-    updated_photo = QtCore.pyqtSignal(int)
-    updated_event = QtCore.pyqtSignal(int)
     
     def __init__(self):
         super(QtCore.QObject, self).__init__()
@@ -332,9 +290,6 @@ class Fetcher(QtCore.QObject):
         self.completed = self.fetcher.completed
         self.error = self.fetcher.error
         self.progress = self.fetcher.progress
-        self.updated_person = self.fetcher.updated_person
-        self.updated_photo = self.fetcher.updated_photo
-        self.updated_event = self.fetcher.updated_event
         
         self.worker.start()
 

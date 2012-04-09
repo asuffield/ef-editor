@@ -1,7 +1,7 @@
 from PyQt4 import QtCore, QtGui, QtNetwork
-from collections import OrderedDict, deque
-from ef.db import Session, Person, Photo
+from collections import OrderedDict
 from ef.netlib import qt_page_get
+from ef.threads import WorkerThread
 import os
 
 max_editing_width = 1200
@@ -62,30 +62,6 @@ class PhotoLoader(QtCore.QObject):
                     image = image.scaled(width, height, QtCore.Qt.KeepAspectRatio)
             self.photo_ready.emit(id, image)
 
-class ThreadRegistry(QtCore.QObject):
-    def __init__(self):
-        super(QtCore.QObject, self).__init__()
-        self.threads = []
-
-    def add(self, thread):
-        self.threads.append(thread)
-
-    def wait_all(self):
-        for thread in self.threads:
-            thread.wait()
-        self.threads = []
-
-    def shutdown(self, rc):
-        for thread in self.threads:
-            thread.exit(rc)
-
-thread_registry = ThreadRegistry()
-
-class WorkerThread(QtCore.QThread):
-    def __init__(self, *args, **kwargs):
-        super(QtCore.QThread, self).__init__(*args, **kwargs)
-        thread_registry.add(self)
-
 class LimitedSizeDict(OrderedDict):
   def __init__(self, *args, **kwds):
       self.size_limit = kwds.pop("size_limit", None)
@@ -129,6 +105,9 @@ class PhotoCache(QtCore.QObject):
             if ready_cb is not None:
                 ready_cb(id, self.cache[id])
             return
+
+        if filename is None or url is None:
+            return None
             
         self.handlers.setdefault(id, []).append({'ready': ready_cb, 'fail': fail_cb})
         self.loading.add(id)
@@ -161,109 +140,3 @@ class PhotoCache(QtCore.QObject):
                 handler['fail'](id, error)
         self._cleanup_after_load(id)
 
-class FindUnsureQuerier(QtCore.QObject):
-    query_result = QtCore.pyqtSignal(int)
-
-    def __init__(self):
-        super(QtCore.QObject, self).__init__()
-        self.buffer = deque()
-        self.visited = set()
-
-    def run_sql_query(self):
-        for p, photo in Session.query(Person, Photo).join(Person.current_photo).filter(Photo.opinion=='unsure').order_by(Person.lastname).order_by(Person.firstname).order_by(Person.id).all():
-            if photo.id in self.visited:
-                continue
-            self.buffer.append(photo.id)
-            self.visited.add(photo.id)
-
-    @QtCore.pyqtSlot(int)
-    def query_one(self):
-        if len(self.buffer) == 0:
-            self.run_sql_query()
-        if len(self.buffer) == 0:
-            # Since we found nothing this time, we'll notify failure
-            # and reset the visited set, so future queries will redo
-            # from the start
-            self.visited = set()
-            self.query_result.emit(-1)
-            return
-
-        id = self.buffer.popleft()
-        self.query_result.emit(id)
-
-class FindUnsure(QtCore.QObject):
-    query_one = QtCore.pyqtSignal()
-
-    def __init__(self):
-        super(QtCore.QObject, self).__init__()
-        self.callbacks = deque()
-        
-        self.worker = WorkerThread()
-        self.querier = FindUnsureQuerier()
-        self.querier.moveToThread(self.worker)
-        self.querier.query_result.connect(self._handle_result)
-        self.query_one.connect(self.querier.query_one)
-        
-        self.worker.start()
-
-    def next(self, callback):
-        self.callbacks.append(callback)
-        self.query_one.emit()
-
-    def _handle_result(self, id):
-        callback = self.callbacks.popleft()
-        if id < 0:
-            callback(None)
-        else:
-            callback(Photo.by_id(id))
-
-class DBUpdateWorker(QtCore.QObject):
-    def __init__(self):
-        super(QtCore.QObject, self).__init__()
-
-    @QtCore.pyqtSlot(int, float, float, float)
-    def update_photo_crop(self, id, centre_x, centre_y, scale):
-        photo = Photo.by_id(id)
-        photo.crop_centre_x = centre_x
-        photo.crop_centre_y = centre_y
-        photo.crop_scale = scale
-        Session.commit()
-
-    @QtCore.pyqtSlot(int, str)
-    def update_photo_opinion(self, id, opinion):
-        photo = Photo.by_id(id)
-        photo.opinion = str(opinion)
-        Session.commit()
-
-    @QtCore.pyqtSlot(int, float)
-    def update_photo_rotation(self, id, angle):
-        photo = Photo.by_id(id)
-        photo.rotate = angle
-        Session.commit()
-
-class DBUpdater(QtCore.QObject):
-    sig_update_photo_crop = QtCore.pyqtSignal(int, float, float, float)
-    sig_update_photo_opinion = QtCore.pyqtSignal(int, str)
-    sig_update_photo_rotation = QtCore.pyqtSignal(int, float)
-    
-    def __init__(self):
-        super(QtCore.QObject, self).__init__()
-        
-        self.worker = WorkerThread()
-        self.updater = DBUpdateWorker()
-        self.updater.moveToThread(self.worker)
-
-        self.sig_update_photo_crop.connect(self.updater.update_photo_crop)
-        self.sig_update_photo_opinion.connect(self.updater.update_photo_opinion)
-        self.sig_update_photo_rotation.connect(self.updater.update_photo_rotation)
-        
-        self.worker.start()
-        
-    def update_photo_crop(self, id, centre_x, centre_y, scale):
-        self.sig_update_photo_crop.emit(id, centre_x, centre_y, scale)
-        
-    def update_photo_opinion(self, id, opinion):
-        self.sig_update_photo_opinion.emit(id, opinion)
-        
-    def update_photo_rotation(self, id, angle):
-        self.sig_update_photo_rotation.emit(id, angle)
