@@ -1,7 +1,5 @@
 High priority
 -------------
-Run on windows
-
 Open image in real editor
 
 Filter person list by event
@@ -17,6 +15,8 @@ vacuum and backup database on start
 Do something with exceptions in the database thread
 
 Photo fetching database logic
+
+use pyinstaller instead of py2exe
 
 Later
 -----
