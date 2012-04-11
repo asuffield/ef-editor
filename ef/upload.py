@@ -253,7 +253,7 @@ class UploadWorker(QtCore.QObject):
     def start_upload(self, ids, username, password):
         if self.manager is None:
             self.manager = QtNetwork.QNetworkAccessManager()
-            self.manager.setProxy(QtNetwork.QNetworkProxy(QtNetwork.QNetworkProxy.HttpProxy, '127.0.0.1', 8080))
+            #self.manager.setProxy(QtNetwork.QNetworkProxy(QtNetwork.QNetworkProxy.HttpProxy, '127.0.0.1', 8080))
 
         self.ids = ids
         self.i = 0

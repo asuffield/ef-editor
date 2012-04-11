@@ -30,6 +30,14 @@ Detect errors when login details wrong
 
 When errors occur during photo uploading that we know are "just retry, EF sucks", retry them
 
+Report on photos with bad sizes, res, or just rejected. Maybe suitable for email shot?
+
+Bad filenames
+
+Think of a way to pick up new registrations quickly. Maybe a report that takes a date?
+
+Multiple simultaneous uploads, for speed? Downloads? Priority of those?
+
 Later
 -----
 Report on bad/unsure images
@@ -46,6 +54,8 @@ Upload and fetch have a lot of code in common - build a
 library. Coroutine model would work well as a superclass: let the
 subclass supply the coro and the superclass supply the function
 methods. Also consume netlib this way.
+
+Better progress indicator?
 
 Open questions
 --------------
