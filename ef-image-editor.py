@@ -6,9 +6,11 @@ import traceback
 from PyQt4 import QtCore, QtGui
 from ef.ui.editor import Ui_ImageEdit
 from ef.ui.fetch_wizard import Ui_LoadPeopleWizard
+from ef.ui.upload_wizard import Ui_UploadPeopleWizard
 from ef.db import Person, Photo, setup_session, FindUnsure, dbmanager
 from ef.lib import PhotoCache
 from ef.fetch import Fetcher
+from ef.upload import Uploader
 from ef.threads import thread_registry
 from collections import deque
 from datetime import datetime
@@ -22,6 +24,7 @@ class ImageListItem(QtGui.QStandardItem):
         self.photo = None
         self.photo_cache = photo_cache
         self.photo_cannot_load = False
+        self.loading = False
 
         self.size_hint = QtCore.QSize(80, 160)
         self.thumbnail_size = QtCore.QSize(60, 80)
@@ -69,18 +72,21 @@ class ImageListItem(QtGui.QStandardItem):
     def photo_updated(self, origin):
         if origin == 'CropFrame':
             return
+        self.loading = False
         self.photo_cannot_load = False
         self.emitDataChanged()
 
     def handle_photo_ready(self, id, image):
+        self.loading = False
         self.emitDataChanged()
 
     def handle_photo_fail(self, id, error):
+        self.loading = False
         self.photo_cannot_load = True
         self.emitDataChanged()
 
     def get_photo(self):
-        if self.photo_cannot_load or self.photo is None:
+        if self.photo_cannot_load or self.photo is None or self.loading:
             return None
 
         pixmap = self.photo_cache.peek_image(self.photo.id)
@@ -100,6 +106,7 @@ class ImageListItem(QtGui.QStandardItem):
                                     ready_cb=self.handle_photo_ready,
                                     fail_cb=self.handle_photo_fail,
                                     scale_size=self.thumbnail_size)
+        self.loading = True
         return None
 
 class CropFrame(QtGui.QGraphicsRectItem):
@@ -226,6 +233,13 @@ class LoadPeopleWizard(QtGui.QWizard, Ui_LoadPeopleWizard):
 
         self.setButtonText(QtGui.QWizard.FinishButton, 'Start download')
 
+class UploadPeopleWizard(QtGui.QWizard, Ui_UploadPeopleWizard):
+    def __init__(self, parent=None):
+        super(QtGui.QWizard, self).__init__(parent)
+        self.setupUi(self)
+
+        self.setButtonText(QtGui.QWizard.FinishButton, 'Start upload')
+
 class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
     output_updated = QtCore.pyqtSignal()
     wheel_event = QtCore.pyqtSignal(int)
@@ -234,7 +248,7 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         super(QtGui.QWidget, self).__init__(parent)
         self.setupUi(self)
 
-        settings = QtCore.QSettings()
+        self.settings = QtCore.QSettings()
         
         self.back.setIcon(self.style().standardIcon(QtGui.QStyle.SP_ArrowBack))
         self.forwards.setIcon(self.style().standardIcon(QtGui.QStyle.SP_ArrowForward))
@@ -245,6 +259,7 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         self.main_photo_cache = PhotoCache(10)
         self.unsure = FindUnsure()
         self.fetcher = Fetcher()
+        self.uploader = Uploader()
         self.current_person = None
         self.current_photo = None
         self.current_pixmap = None
@@ -255,7 +270,7 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         self.suppress_history = False
 
         self.fetch_wizard = LoadPeopleWizard()
-        self.fetch_wizard.ef_username.setText(settings.value('ef-username', '').toString())
+        self.upload_wizard = UploadPeopleWizard()
 
         self.image_list_items = {}
 
@@ -296,18 +311,31 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         self.forwards.clicked.connect(self.handle_forwards)
         self.search.clicked.connect(self.handle_search)
         self.search_for.returnPressed.connect(self.handle_search)
+
         self.action_fetch.triggered.connect(self.handle_fetch_wizard)
         self.fetch_wizard.accepted.connect(self.handle_fetch)
         self.fetch_wizard.rejected.connect(self.handle_fetch_rejected)
+
         self.fetcher.completed.connect(self.handle_fetch_completed)
         self.fetcher.error.connect(self.handle_fetch_error)
         self.fetcher.progress.connect(self.handle_fetch_progress)
+
+        self.action_upload.triggered.connect(self.handle_upload_wizard)
+        self.upload_wizard.accepted.connect(self.handle_upload)
+        self.upload_wizard.rejected.connect(self.handle_upload_rejected)
+
+        self.uploader.completed.connect(self.handle_upload_completed)
+        self.uploader.error.connect(self.handle_upload_error)
+        self.uploader.progress.connect(self.handle_upload_progress)
+
         self.rotate.valueChanged.connect(self.handle_rotate)
         self.rotate_0.clicked.connect(lambda: self.rotate.setValue(0))
         self.rotate_l90.clicked.connect(lambda: self.rotate.setValue(-90))
         self.rotate_l180.clicked.connect(lambda: self.rotate.setValue(-180))
         self.rotate_r90.clicked.connect(lambda: self.rotate.setValue(90))
         self.rotate_r180.clicked.connect(lambda: self.rotate.setValue(180))
+
+        self.action_openeventsforce.triggered.connect(self.handle_openeventsforce)
 
         self.status_expiry_timer = QtCore.QTimer(self)
         self.status_expiry_timer.setInterval(5000)
@@ -374,6 +402,7 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         self.main_pixmap.hide()
         self.preview_image.setPixmap(QtGui.QPixmap())
         self.person_name.setText(u'')
+        self.upload_wizard.upload_photos_thisname.setText('')
         self.next_unchecked.setDisabled(False)
 
     def foreach_item(self, f):
@@ -446,6 +475,7 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
             self.current_person = p
             self.current_photo = photo
             self.person_name.setText(u'Loading %s...' % p)
+            self.upload_wizard.upload_photos_thisname.setText(str(p))
 
             self.main_photo_cache.load_image(photo.id, photo.full_path(), photo.url,
                                              ready_cb=self.handle_photo_ready,
@@ -588,12 +618,17 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         pixmap = pixmap.scaled(60, 80, QtCore.Qt.KeepAspectRatio)
         self.preview_image.setPixmap(pixmap)
 
+    def set_ef_ops_enabled(self, enabled):
+        self.action_fetch.setEnabled(enabled)
+        self.action_upload.setEnabled(enabled)
+
     def handle_fetch_wizard(self):
+        self.fetch_wizard.ef_username.setText(self.settings.value('ef-username', '').toString())
         self.fetch_wizard.show()
-        self.action_fetch.setEnabled(False)
+        self.set_ef_ops_enabled(False)
 
     def handle_fetch_rejected(self):
-        self.action_fetch.setEnabled(True)
+        self.set_ef_ops_enabled(True)
 
     def handle_fetch(self):
         self.fetch_wizard.restart()
@@ -612,15 +647,57 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         self.fetcher.start_fetch(fetch_people_report, fetch_photos, username, password)
 
     def handle_fetch_completed(self):
-        self.action_fetch.setEnabled(True)
+        self.set_ef_ops_enabled(True)
         self.status_finished()
 
     def handle_fetch_error(self, err):
         print >>sys.stderr, err
         QtGui.QMessageBox.information(self, "Error during fetch", err)
+        self.set_ef_ops_enabled(True)
         self.status_finished()
 
     def handle_fetch_progress(self, text, cur, max):
+        self.status_start(text, max)
+        self.progress.setValue(cur)
+
+    def handle_upload_wizard(self):
+        self.upload_wizard.ef_username.setText(self.settings.value('ef-username', '').toString())
+        # XXX: move to "change of current_person" functions
+        self.upload_wizard.upload_photos_thisone.setEnabled(self.current_person is not None)
+        self.upload_wizard.show()
+        self.set_ef_ops_enabled(False)
+
+    def handle_upload_rejected(self):
+        self.set_ef_ops_enabled(True)
+
+    def handle_upload(self):
+        self.upload_wizard.restart()
+        
+        upload_photos = []
+        if self.upload_wizard.upload_photos_thisone.isChecked() and self.current_person is not None:
+            upload_photos = [self.current_person.id]
+        elif self.upload_wizard.upload_photos_bysize.isChecked():
+            upload_photos = []
+        elif self.upload_wizard.upload_photos_all.isChecked():
+            upload_photos = []
+        username = str(self.upload_wizard.ef_username.text())
+        password = str(self.upload_wizard.ef_password.text())
+
+        QtCore.QSettings().setValue('ef-username', username)
+
+        self.uploader.start_upload(upload_photos, username, password)
+
+    def handle_upload_completed(self):
+        self.set_ef_ops_enabled(True)
+        self.status_finished()
+
+    def handle_upload_error(self, err):
+        print >>sys.stderr, err
+        QtGui.QMessageBox.information(self, "Error during upload", err)
+        self.set_ef_ops_enabled(True)
+        self.status_finished()
+
+    def handle_upload_progress(self, text, cur, max):
         self.status_start(text, max)
         self.progress.setValue(cur)
 
@@ -630,6 +707,10 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
             id, ok = key['id'].toInt()
             item = self.image_list_items[id] = ImageListItem(self.list_photo_cache, id)
             self.person_model.appendRow(item)
+
+    def handle_openeventsforce(self):
+        if self.current_person is not None:
+            QtGui.QDesktopServices.openUrl(QtCore.QUrl('https://www.eventsforce.net/libdems/backend/home/codEditMain.csp?codReadOnly=1&personID=%d&curPage=1' % self.current_person.id))
 
 def setup():
     datadir = QtGui.QDesktopServices.storageLocation(QtGui.QDesktopServices.DataLocation)

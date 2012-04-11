@@ -46,6 +46,7 @@ class DBWorker(QtCore.QObject):
         self.batches = {}
         self.tables = {}
         self.write_cache = OrderedDict()
+        self.insert_queue = deque()
 
     @QtCore.pyqtSlot(dict)
     def register_class(self, rec):
@@ -73,6 +74,12 @@ class DBWorker(QtCore.QObject):
         db = QtSql.QSqlDatabase.database()
         db.transaction()
         try:
+            while self.insert_queue and not timer.hasExpired(200):
+                queued = self.insert_queue.popleft()
+                self.do_insert(queued['table'], queued['values'], queued['origin'])
+                for k,v in queued['batches'].iteritems():
+                    batches[k] = v + batches.get(k, 0)
+                
             while self.write_cache and not timer.hasExpired(200):
                 k, queued = self.write_cache.popitem(last=False)
                 table,key = k
@@ -107,9 +114,14 @@ class DBWorker(QtCore.QObject):
         return self.binds.setdefault(str(table), {}).setdefault(k, [])
 
     def get_queued_update(self, table, key):
-        k = (table, tuple(sorted(key.items())))
-        queued = self.write_cache.setdefault(k, {'key_fields': None, 'values': {}, 'origin': set(), 'upsert': False, 'batches': {}})
-        self.pending.emit(len(self.write_cache))
+        new_rec = {'table': table, 'key_fields': None, 'values': {}, 'origin': set(), 'upsert': False, 'batches': {}}
+        if key is None:
+            self.insert_queue.append(new_rec)
+            queued = new_rec
+        else:
+            k = (table, tuple(sorted(key.items())))
+            queued = self.write_cache.setdefault(k, new_rec)
+        self.pending.emit(len(self.write_cache) + len(self.insert_queue))
         return queued
 
     @QtCore.pyqtSlot(str, dict, DBBaseProxy)
@@ -176,12 +188,17 @@ class DBWorker(QtCore.QObject):
 
     def extract_key(self, table, values):
         key_fields = self.key_fields(table)
-        key = dict([(k,values[k]) for k in key_fields])
-        return key
+        try:
+            key = dict([(k,values[k]) for k in key_fields])
+            return key
+        except KeyError:
+            return None
 
     @QtCore.pyqtSlot(str, dict, str, int)
     def update(self, table, values, origin, batchid):
         key = self.extract_key(table, values)
+        if key is None:
+            raise KeyError("update requires the key be fully specified")
         queued = self.get_queued_update(table, key)
         queued['values'].update(values)
         queued['batches'][batchid] = 1 + queued['batches'].get(batchid, 0)
@@ -222,6 +239,13 @@ class DBWorker(QtCore.QObject):
     def do_upsert(self, table, values, origin):
         key_fields = self.key_fields(table)
 
+        # Short-circuit: upsert with missing key goes right to the
+        # database, and let the schema decide whether it's legitimate
+        for k in key_fields:
+            if k not in values:
+                self.do_insert(table, values, origin)
+                return
+
         query = QtSql.QSqlQuery()
         stmt = 'select %s from %s where %s' % (','.join(key_fields), table, self.key_expr(table))
         if not query.prepare(stmt):
@@ -259,64 +283,10 @@ class DBWorker(QtCore.QObject):
         for o in origin:
             self.created.emit(table, key, o)
 
-    # This is a hideous abstraction violation, but it's better than
-    # building an elaborate infrastructure just to support this one
-    # transaction
-
-    # If we get more of these, rethink how all this works. Problem is
-    # that we need logic inside the transaction, hence we need logic
-    # in the db thread... and if the logic has to be shoved somewhere,
-    # why not here?
-    @QtCore.pyqtSlot(int, str, int)
-    def fetched_photo(self, person_id, url, batchid):
-        db = QtSql.QSqlDatabase.database()
-        db.transaction()
-        try:
-            id = self.find_photo(person_id, url)
-
-            if id is not None:
-                self.do_update('photo', ['id'], {'id': id,
-                                                 'date_fetched': time.time(),
-                                                 }, ['fetched_photo'])
-            else:
-                self.do_insert('photo', ['id'], {'url' : url,
-                                              'date_fetched' : time.time(),
-                                              'person_id' : person_id,
-                                              'crop_centre_x' : 0.5,
-                                              'crop_centre_y' : 0.5,
-                                              'crop_scale' : 1,
-                                              'rotate' : 0,
-                                              'opinion' : 'unsure',
-                                              }, ['fetched_photo'])
-                id = self.find_photo(person_id, url)
-
-            self.do_update('person', ['id'], {'id': person_id,
-                                              'current_photo_id': id,
-                                              }, ['fetched_photo'])
-            db.commit()
-        except:
-            db.rollback()
-            raise
-
-    def find_photo(self, person_id, url):
-        query = QtSql.QSqlQuery()
-        query.prepare('select id from photo where person_id = :person_id and url = :url')
-        query.bindValue(':person_id', person_id)
-        query.bindValue(':url', url)
-        query.setForwardOnly(True)
-        query.exec_()
-        if query.next():
-            id, ok = query.value(0).toInt()
-        else:
-            id = None
-        query.finish()
-        return id
-
 class DBManager(QtCore.QObject):
     sig_bind = QtCore.pyqtSignal(str, dict, DBBaseProxy)
     sig_update = QtCore.pyqtSignal(str, dict, str, int)
     sig_upsert = QtCore.pyqtSignal(str, dict, str, int)
-    sig_fetched_photo = QtCore.pyqtSignal(int, str, int)
     sig_register_batch = QtCore.pyqtSignal(int, BatchProxy)
     sig_register_class = QtCore.pyqtSignal(dict)
     sig_signal_existing_created = QtCore.pyqtSignal(str)
@@ -334,7 +304,6 @@ class DBManager(QtCore.QObject):
         self.sig_bind.connect(self.dbworker.bind)
         self.sig_update.connect(self.dbworker.update)
         self.sig_upsert.connect(self.dbworker.upsert)
-        self.sig_fetched_photo.connect(self.dbworker.fetched_photo)
         self.sig_register_batch.connect(self.dbworker.register_batch)
         self.sig_register_class.connect(self.dbworker.register_class)
         self.sig_signal_existing_created.connect(self.dbworker.signal_existing_created)
@@ -385,9 +354,6 @@ class DBManager(QtCore.QObject):
 
     def signal_existing_created(self, table):
         self.sig_signal_existing_created.emit(table)
-
-    def fetched_photo(self, person_id, url, batchid):
-        self.sig_fetched_photo.emit(person_id, url, batchid)
 
 dbmanager = DBManager()
 
@@ -458,6 +424,59 @@ class DBBase(QtCore.QObject):
     def signal_existing_created(self):
         dbmanager.signal_existing_created(self.__tablename__)
 
+class Batch(QtCore.QObject):
+    finished = QtCore.pyqtSignal()
+    progress = QtCore.pyqtSignal(int, int)
+
+    def __init__(self, parent=None):
+        QtCore.QObject.__init__(self)
+
+        self.batch_proxy = BatchProxy()
+        self.batch_proxy.moveToThread(dbmanager.worker)
+        self.batch_proxy.commit.connect(self.handle_commit)
+        dbmanager.register_batch(id(self), self.batch_proxy)
+
+        self.children = set()
+        self.finished_children = set()
+        self.ops_started = 0
+        self.ops_committed = 0
+        self.finish_called = False
+
+        self.parent = parent
+        if parent is not None:
+            parent.register_child(self)
+
+    def add_op(self):
+        if self.finish_called:
+            raise Exception('op added to Batch after finish() called')
+        self.ops_started = self.ops_started + 1
+
+    def register_child(self, child):
+        if self.finish_called:
+            raise Exception('child added to Batch after finish() called')
+        self.children.add(child)
+        child.finished.connect(lambda: self.handle_child(child))
+        self.check_for_finished()
+
+    def handle_child(self, child):
+        self.finished_children.add(child)
+        self.check_for_finished()
+
+    def handle_commit(self, ops):
+        self.ops_committed = self.ops_committed + ops
+        if self.ops_committed > self.ops_started:
+            raise Exception('Batch has more ops started than committed')
+        self.check_for_finished()
+
+    def finish(self):
+        self.finish_called = True
+        self.check_for_finished()
+
+    def check_for_finished(self):
+        self.progress.emit(self.ops_committed + len(self.finished_children), self.ops_started + len(self.children))
+        if self.finish_called and self.ops_started == self.ops_committed and len(self.children) == len(self.finished_children):
+            self.finished.emit()
+
 def conv_int(v):
     i,ok = v.toInt()
     return int(i)
@@ -518,10 +537,6 @@ class Photo(DBBase):
         self.update({'id': self.id,
                      'rotate': angle,
                      }, origin)
-
-    @classmethod
-    def fetched(self, person_id, url, batch=None):
-        dbmanager.fetched_photo(person_id, url, self.batch_op(batch))
 
 class Person(DBBase):
     __tablename__ = 'person'
@@ -645,41 +660,60 @@ class FindPhotos(QtCore.QObject):
     def run(self):
         self.sig_run.emit()
 
-class Batch(QtCore.QObject):
+class FetchedPhotoWorker(QtCore.QObject):
     finished = QtCore.pyqtSignal()
-    progress = QtCore.pyqtSignal(int, int)
 
-    def __init__(self):
+    def __init__(self, person_id, url, batch):
+        QtCore.QObject.__init__(self)
+        self.person_id = person_id
+        self.url = url
+        self.first_batch = Batch(batch)
+        self.second_batch = Batch(batch)
+
+    def find_photo(self):
+        query = QtSql.QSqlQuery()
+        query.prepare('select id from photo where person_id = :person_id and url = :url')
+        query.bindValue(':person_id', self.person_id)
+        query.bindValue(':url', self.url)
+        query.setForwardOnly(True)
+        query.exec_()
+        if query.next():
+            id, ok = query.value(0).toInt()
+        else:
+            id = None
+        query.finish()
+        return id
+
+    @QtCore.pyqtSlot()
+    def run(self):
+        photo_id = self.find_photo()
+        query = QtSql.QSqlQuery()
+        query.setForwardOnly(True)
+        if photo_id is not None:
+            dbmanager.update('photo', {'id': id, 'date_fetched': time.time()}, 'FetchedPhoto', DBBase.batch_op(self.first_batch))
+        else:
+            dbmanager.upsert('photo', {'url': self.url, 'person_id': self.person_id, 'date_fetched': time.time()}, 'FetchedPhoto', DBBase.batch_op(self.first_batch))
+
+        self.first_batch.finished.connect(self.update_person)
+        self.first_batch.finish()
+
+    def update_person(self):
+        photo_id = self.find_photo()
+        dbmanager.update('person', {'id': self.person_id, 'current_photo_id': photo_id}, 'FetchedPhoto', DBBase.batch_op(self.second_batch))
+        self.second_batch.finish()
+
+class FetchedPhoto(QtCore.QObject):
+    sig_run = QtCore.pyqtSignal()
+
+    def __init__(self, person_id, url, batch):
         QtCore.QObject.__init__(self)
 
-        self.batch_proxy = BatchProxy()
-        self.batch_proxy.moveToThread(dbmanager.worker)
-        self.batch_proxy.commit.connect(self.handle_commit)
-        dbmanager.register_batch(id(self), self.batch_proxy)
+        self.worker = FetchedPhotoWorker(person_id, url, batch)
+        self.worker.moveToThread(dbmanager.worker)
+        self.sig_run.connect(self.worker.run)
 
-        self.ops_started = 0
-        self.ops_committed = 0
-        self.finish_called = False
-
-    def add_op(self):
-        if self.finish_called:
-            raise Exception('op added to Batch after finish() called')
-        self.ops_started = self.ops_started + 1
-
-    def handle_commit(self, ops):
-        self.ops_committed = self.ops_committed + ops
-        if self.ops_committed > self.ops_started:
-            raise Exception('Batch has more ops started than committed')
-        self.progress.emit(self.ops_committed, self.ops_started)
-        self.check_for_finished()
-
-    def finish(self):
-        self.finish_called = True
-        self.check_for_finished()
-
-    def check_for_finished(self):
-        if self.finish_called and self.ops_started == self.ops_committed:
-            self.finished.emit()
+    def run(self):
+        self.sig_run.emit()
 
 def setup_session(datadir):
     global engine, photodir

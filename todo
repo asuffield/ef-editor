@@ -1,6 +1,14 @@
 High priority
 -------------
+Show figures for amount of photo cropped and amount of pixels in what's left
+
+Figure out the number of pixels we need in photos for them to be acceptable
+
+Do something about signal disconnect bugs
+
 Open image in real editor
+
+Import image files
 
 Filter person list by event
 
@@ -18,6 +26,10 @@ Photo fetching database logic
 
 use pyinstaller instead of py2exe
 
+Detect errors when login details wrong
+
+When errors occur during photo uploading that we know are "just retry, EF sucks", retry them
+
 Later
 -----
 Report on bad/unsure images
@@ -26,9 +38,14 @@ Better browsing - sort by opinion, size badness, etc
 
 Image history
 
-Show full person record? Certainly link to eventsforce in web browser
-
 EF fetch photos should allow "just this person"
+
+When the application crashes to an exception, shut down worker threads before main application (or else they segfault)
+
+Upload and fetch have a lot of code in common - build a
+library. Coroutine model would work well as a superclass: let the
+subclass supply the coro and the superclass supply the function
+methods. Also consume netlib this way.
 
 Open questions
 --------------

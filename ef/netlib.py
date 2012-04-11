@@ -117,10 +117,27 @@ def split_header_words(header_values):
 def encode_form_fields(fields):
     return urlencode(dict([(k,unicode(v).encode('utf-8')) for k,v in fields.items()]))
 
-def qt_form_post(manager, url, fields):
+def qt_form_post(manager, url, fields, file=None):
     request = QtNetwork.QNetworkRequest(QtCore.QUrl(url))
-    request.setHeader(QtNetwork.QNetworkRequest.ContentTypeHeader, 'application/x-www-form-urlencoded; charset=utf-8')
-    reply = manager.post(request, encode_form_fields(fields))
+    if file is None:
+        request.setHeader(QtNetwork.QNetworkRequest.ContentTypeHeader, 'application/x-www-form-urlencoded; charset=utf-8')
+        reply = manager.post(request, encode_form_fields(fields))
+    else:
+        multipart = QtNetwork.QHttpMultiPart(QtNetwork.QHttpMultiPart.FormDataType)
+        for name, value in fields.iteritems():
+            part = QtNetwork.QHttpPart()
+            part.setHeader(QtNetwork.QNetworkRequest.ContentTypeHeader, 'text/plain; charset=utf-8')
+            part.setHeader(QtNetwork.QNetworkRequest.ContentDispositionHeader, 'form-data; name="%s"' % name)
+            part.setBody(value.encode('utf-8'))
+            multipart.append(part)
+        filepart = QtNetwork.QHttpPart()
+        filepart.setHeader(QtNetwork.QNetworkRequest.ContentTypeHeader, file['type'])
+        filepart.setHeader(QtNetwork.QNetworkRequest.ContentDispositionHeader, 'form-data; name="%s"; filename="%s"' % (file['name'], file['filename']))
+        filepart.setBodyDevice(file['device'])
+        multipart.append(filepart)
+        reply = manager.post(request, multipart)
+        # Hook multipart to the reply so that it sticks around for the lifetime of the request
+        multipart.setParent(reply)
     return reply
 
 def qt_page_get(manager, url):

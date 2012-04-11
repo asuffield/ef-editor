@@ -1,13 +1,11 @@
 from PyQt4 import QtCore, QtGui, QtNetwork
 from ef.lib import WorkerThread
-from ef.db import Person, Photo, Event, Registration, FindPhotos, Batch
+from ef.db import Person, Photo, Event, Registration, FindPhotos, Batch, FetchedPhoto
 from ef.parser import EFDelegateParser
 from bs4 import BeautifulSoup
 import traceback
 import time
 from ef.netlib import qt_form_post, qt_page_get, qt_reply_charset, qt_readall_charset, qt_relative_url
-
-import thread
 
 class PersonDBParser(EFDelegateParser):
     def __init__(self, progress, batch):
@@ -194,9 +192,12 @@ class PhotosTask(FetchTask):
         FetchTask.__init__(self, worker)
         self.get_reply = None
         self.which = which
+        self.db_tasks = {}
+        self.batch = Batch()
 
     @catcherror
     def run(self):
+        self.batch.finished.connect(self.finished)
         self.find_photos = FindPhotos(self.which)
         self.find_photos.results.connect(self.photos_ready)
         self.find_photos.run()
@@ -211,13 +212,17 @@ class PhotosTask(FetchTask):
 
     def run_person(self):
         if self.i >= len(self.people):
-            self.finished.emit()
+            self.batch.finish()
+            self.batch.progress.connect(self.handle_commit_progress)
             return
 
         reply = qt_page_get(self.worker.manager,
                             'https://www.eventsforce.net/libdems/backend/home/codEditMain.csp?codReadOnly=1&personID=%d&curPage=1' % self.people[self.i])
         reply.finished.connect(self.get_finished)
         self.get_reply = reply
+
+    def handle_commit_progress(self, cur, max):
+        self.worker.progress.emit('Saving photo URLs', cur, max)
 
     @catcherror
     def get_finished(self):
@@ -230,7 +235,8 @@ class PhotosTask(FetchTask):
         img = soup.find('img', title='Picture Profile')
         if img is not None:
             url = str(qt_relative_url(self.get_reply, img['src']).toString())
-            Photo.fetched(self.people[self.i], url)
+            self.db_tasks[self.i] = FetchedPhoto(self.people[self.i], url, self.batch)
+            self.db_tasks[self.i].run()
         self.worker.progress.emit('Finding photos', self.i, len(self.people))
 
         self.i = self.i + 1

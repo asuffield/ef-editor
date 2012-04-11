@@ -521,7 +521,7 @@ unsure</string>
        <bool>false</bool>
       </property>
       <property name="layoutMode">
-       <enum>QListView::Batched</enum>
+       <enum>QListView::SinglePass</enum>
       </property>
       <property name="spacing">
        <number>10</number>
@@ -633,6 +633,7 @@ unsure</string>
     <addaction name="separator"/>
     <addaction name="action_history"/>
     <addaction name="action_editimage"/>
+    <addaction name="action_openeventsforce"/>
    </widget>
    <widget class="QMenu" name="menuEvent">
     <property name="title">
@@ -666,6 +667,11 @@ unsure</string>
   <action name="action_event_all">
    <property name="text">
     <string>All events</string>
+   </property>
+  </action>
+  <action name="action_openeventsforce">
+   <property name="text">
+    <string>Open in eventsforce</string>
    </property>
   </action>
  </widget>
