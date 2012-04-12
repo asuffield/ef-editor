@@ -636,6 +636,9 @@ class FindPhotosWorker(QtCore.QObject):
         if self.which == 'missing':
             query = QtSql.QSqlQuery("""select person.id from person left outer join photo on person.current_photo_id = photo.id where person.current_photo_id is null or photo.opinion = 'bad'
                                        order by person.lastname, person.firstname, person.id""")
+        elif self.which == 'good':
+            query = QtSql.QSqlQuery("""select person.id from person join photo on person.current_photo_id = photo.id where photo.opinion = 'ok'
+                                       order by person.lastname, person.firstname, person.id""")
         else:
             query = QtSql.QSqlQuery("""select person.id from person order by person.lastname, person.firstname, person.id""")
         ids = []

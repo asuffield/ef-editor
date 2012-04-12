@@ -683,13 +683,14 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
     def handle_upload(self):
         self.upload_wizard.restart()
         
-        upload_photos = []
         if self.upload_wizard.upload_photos_thisone.isChecked() and self.current_person is not None:
-            upload_photos = [self.current_person.id]
+            upload_photos = {'mode': 'list', 'people': [self.current_person.id]}
         elif self.upload_wizard.upload_photos_bysize.isChecked():
-            upload_photos = []
+            upload_photos = {'mode': 'percent', 'filter': int(self.upload_wizard.upload_photos_minsize.text())}
         elif self.upload_wizard.upload_photos_all.isChecked():
-            upload_photos = []
+            upload_photos = {'mode': 'good'}
+        else:
+            return
         username = str(self.upload_wizard.ef_username.text())
         password = str(self.upload_wizard.ef_password.text())
 

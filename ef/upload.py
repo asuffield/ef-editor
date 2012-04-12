@@ -1,7 +1,8 @@
+from __future__ import division
 import re
 from PyQt4 import QtCore, QtGui, QtNetwork
 from ef.lib import WorkerThread
-from ef.db import Person, Photo, Registration, Batch, FetchedPhoto
+from ef.db import Person, Photo, Registration, Batch, FetchedPhoto, FindPhotos
 from ef.parser import EFDelegateParser
 from bs4 import BeautifulSoup
 import traceback
@@ -17,10 +18,10 @@ def catcherror(func):
     return wrapped
 
 class UploadTask(QtCore.QObject):
-    completed = QtCore.pyqtSignal()
+    completed = QtCore.pyqtSignal(bool)
     error = QtCore.pyqtSignal(str)
 
-    def __init__(self, id, manager, batch):
+    def __init__(self, id, minimum_change, manager, batch):
         super(QtCore.QObject, self).__init__()
 
         self.id = id
@@ -29,6 +30,7 @@ class UploadTask(QtCore.QObject):
         self.person = Person(id)
         self.person.updated.connect(self.person_updated)
         self.reply = None
+        self.minimum_change = minimum_change
 
     def person_updated(self, origin):
         if origin != 'bind':
@@ -47,15 +49,23 @@ class UploadTask(QtCore.QObject):
 
         # Read in the image
 
-        # XXX: skip images that aren't downloaded?
+        # XXX: skip images that aren't downloaded? Yes, no cropping without checking
         reader = QtGui.QImageReader(self.photo.full_path())
         image = reader.read()
 
         if image.isNull():
+            if reader.error() == QtGui.QImageReader.FileNotFoundError:
+                # Just skip images that haven't been downloaded, we
+                # couldn't possibly want to upload something we
+                # haven't looked at
+                self.completed.emit(False)
+                return
             self.error.emit(reader.errorString())
             return
 
         # Now we need to scale the image, etc...
+
+        orig_size = image.width() * image.height()
 
         image = image.transformed(QtGui.QTransform().rotate(self.photo.rotate))
         width = image.width()
@@ -73,6 +83,14 @@ class UploadTask(QtCore.QObject):
         crop_centre_y = height * self.photo.crop_centre_y
 
         image = image.copy(crop_centre_x - crop_width/2, crop_centre_y - crop_height/2, crop_width, crop_height)
+
+        new_size = image.width() * image.height()
+
+        size_change = new_size / orig_size
+        if (100 * abs(1 - size_change)) < self.minimum_change:
+            # This photo hasn't changed enough so we'll skip it
+            self.completed.emit(False)
+            return
 
         # Stash the edited image for debugging
         #writer = QtGui.QImageWriter('out.jpeg', 'jpeg')
@@ -230,7 +248,9 @@ class UploadTask(QtCore.QObject):
             reply = self.coro.send(soup)
             self.setup_coro_signals(reply)
         except StopIteration:
-            self.completed.emit()
+            self.completed.emit(True)
+        except:
+            self.error.emit(traceback.format_exc())
 
     def abort(self):
         if self.reply is not None and not self.reply.isFinished():
@@ -249,21 +269,37 @@ class UploadWorker(QtCore.QObject):
         self.tasks = None
         self.reply = None
 
-    @QtCore.pyqtSlot(list, str, str)
+    @QtCore.pyqtSlot(dict, str, str)
     @catcherror
     def start_upload(self, ids, username, password):
         if self.manager is None:
             self.manager = QtNetwork.QNetworkAccessManager()
             #self.manager.setProxy(QtNetwork.QNetworkProxy(QtNetwork.QNetworkProxy.HttpProxy, '127.0.0.1', 8080))
 
+        self.aborted = False
         self.ids = ids
         self.i = 0
+        self.upload_count = 0
         self.tasks = {}
         self.batch = Batch()
         self.batch.finished.connect(self.completed)
         self.username = username
         self.password = password
+        self.percent_filter = 0
 
+        if self.ids['mode'] == 'good' or self.ids['mode'] == 'percent':
+            self.find_photos = FindPhotos('good')
+            self.find_photos.results.connect(self.photos_ready)
+            self.find_photos.run()
+            if self.ids['mode'] == 'percent':
+                self.percent_filter = self.ids['filter']
+        else:
+            self.people = self.ids['people']
+            self.login()
+
+    def photos_ready(self, people):
+        self.people = people
+        print people
         self.login()
 
     def login(self):
@@ -277,7 +313,7 @@ class UploadWorker(QtCore.QObject):
             self.error.emit(self.reply.errorString())
             return
 
-        self.reply.finished.disconnect()
+        self.reply.finished.disconnect(self.got_login_page)
         charset = qt_reply_charset(self.reply)
         soup = BeautifulSoup(qt_readall_charset(self.reply, charset))
 
@@ -314,19 +350,21 @@ class UploadWorker(QtCore.QObject):
         self.next_task()
 
     def next_task(self):
-        self.progress.emit('Uploading photos', self.i, len(self.ids))
+        self.progress.emit('Uploading photos', self.i, len(self.people))
 
-        if self.i >= len(self.ids):
+        if self.i >= len(self.people):
             self.batch.progress.connect(self.handle_commit_progress)
             self.batch.finish()
             return
 
-        id = self.ids[self.i]
-        self.tasks[id] = UploadTask(id, self.manager, self.batch)
+        id = self.people[self.i]
+        self.tasks[id] = UploadTask(id, self.percent_filter, self.manager, self.batch)
         self.tasks[id].completed.connect(self.handle_task_complete)
         self.tasks[id].error.connect(self.handle_error)
 
-    def handle_task_complete(self):
+    def handle_task_complete(self, uploaded):
+        if uploaded:
+            self.upload_count = self.upload_count + 1
         self.i = self.i + 1
         self.next_task()
 
@@ -334,8 +372,11 @@ class UploadWorker(QtCore.QObject):
         self.progress.emit('Saving new photo URLs', cur, max)
 
     def handle_error(self, err):
+        if self.aborted:
+            return
+        self.aborted = True
+
         if self.reply is not None and not self.reply.isFinished():
-            self.reply.finished.disconnect()
             self.reply.abort()
 
         self.error.emit(err)
@@ -344,7 +385,7 @@ class UploadWorker(QtCore.QObject):
                 task.abort()
 
 class Uploader(QtCore.QObject):
-    sig_start_upload = QtCore.pyqtSignal(list, str, str)
+    sig_start_upload = QtCore.pyqtSignal(dict, str, str)
     
     def __init__(self):
         super(QtCore.QObject, self).__init__()
