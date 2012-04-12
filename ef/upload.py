@@ -241,10 +241,9 @@ class UploadTask(QtCore.QObject):
             self.setup_coro_signals(reply)
             return
 
-        charset = qt_reply_charset(self.reply)
-        soup = BeautifulSoup(qt_readall_charset(self.reply, charset))
-
         try:
+            charset = qt_reply_charset(self.reply)
+            soup = BeautifulSoup(qt_readall_charset(self.reply, charset))
             reply = self.coro.send(soup)
             self.setup_coro_signals(reply)
         except StopIteration:
