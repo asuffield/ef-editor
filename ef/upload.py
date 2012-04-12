@@ -47,6 +47,7 @@ class UploadTask(QtCore.QObject):
 
         # Read in the image
 
+        # XXX: skip images that aren't downloaded?
         reader = QtGui.QImageReader(self.photo.full_path())
         image = reader.read()
 

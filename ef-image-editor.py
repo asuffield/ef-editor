@@ -1,5 +1,7 @@
 #!/usr/bin/python -d
- 
+
+from __future__ import division
+
 import sys
 import os
 import traceback
@@ -615,8 +617,16 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
 
         pixmap = self.main_pixmap.pixmap()
         pixmap = pixmap.copy(self.crop_frame.cropping_rect())
-        pixmap = pixmap.scaled(60, 80, QtCore.Qt.KeepAspectRatio)
+
+        orig_size = self.current_pixmap.width() * self.current_pixmap.height()
+        new_size = pixmap.width() * pixmap.height()
+
+        pixmap = pixmap.scaled(102, 136, QtCore.Qt.KeepAspectRatio)
         self.preview_image.setPixmap(pixmap)
+
+        size_change = new_size / orig_size
+        self.percent_change.setText('%d%%' % int(100*size_change))
+        self.pixel_count.setText('%d pixels' % new_size)
 
     def set_ef_ops_enabled(self, enabled):
         self.action_fetch.setEnabled(enabled)

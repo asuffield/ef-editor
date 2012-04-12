@@ -283,14 +283,14 @@
             </property>
             <property name="minimumSize">
              <size>
-              <width>62</width>
-              <height>82</height>
+              <width>102</width>
+              <height>136</height>
              </size>
             </property>
             <property name="maximumSize">
              <size>
-              <width>62</width>
-              <height>82</height>
+              <width>102</width>
+              <height>136</height>
              </size>
             </property>
             <property name="palette">
@@ -384,6 +384,26 @@
            </widget>
           </item>
          </layout>
+        </item>
+        <item>
+         <widget class="QLabel" name="percent_change">
+          <property name="text">
+           <string/>
+          </property>
+          <property name="alignment">
+           <set>Qt::AlignCenter</set>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QLabel" name="pixel_count">
+          <property name="text">
+           <string/>
+          </property>
+          <property name="alignment">
+           <set>Qt::AlignCenter</set>
+          </property>
+         </widget>
         </item>
         <item>
          <widget class="QPushButton" name="next_unchecked">
