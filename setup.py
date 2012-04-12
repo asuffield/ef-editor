@@ -8,7 +8,7 @@ setup(
 
     options = {
         'py2exe': {
-            'includes': ['sip', 'PyQt4.QtSql'],
+            'includes': ['sip', 'PyQt4.QtSql', 'lxml.etree', 'lxml._elementpath', 'gzip'],
             'dll_excludes': ['MSVCP90.dll'],
             },
         },

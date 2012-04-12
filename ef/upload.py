@@ -243,7 +243,7 @@ class UploadTask(QtCore.QObject):
 
         try:
             charset = qt_reply_charset(self.reply)
-            soup = BeautifulSoup(qt_readall_charset(self.reply, charset))
+            soup = BeautifulSoup(qt_readall_charset(self.reply, charset), 'lxml')
             reply = self.coro.send(soup)
             self.setup_coro_signals(reply)
         except StopIteration:
