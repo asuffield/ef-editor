@@ -14,6 +14,7 @@ from ef.lib import PhotoCache
 from ef.fetch import Fetcher
 from ef.upload import Uploader
 from ef.threads import thread_registry
+from ef.netlib import start_network_manager
 from collections import deque
 from datetime import datetime
 
@@ -729,6 +730,7 @@ def setup():
     if not dir.exists(datadir):
         dir.mkpath(datadir)
     setup_session(str(datadir))
+    start_network_manager()
  
 if __name__ == "__main__":
     QtCore.QCoreApplication.setOrganizationName('asuffield.me.uk')

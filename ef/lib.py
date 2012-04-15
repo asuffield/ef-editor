@@ -140,3 +140,22 @@ class PhotoCache(QtCore.QObject):
                 handler['fail'](id, error)
         self._cleanup_after_load(id)
 
+class SignalGroup(QtCore.QObject):
+    '''A SignalGroup will emit its fire signal once, after all the
+    signals in the group have been emitted at least once. Repeat
+    emissions and signal arguments are ignored'''
+    
+    fire = QtCore.pyqtSignal()
+    def __init__(self, *signals):
+        QtCore.QObject.__init__(self)
+        self.pending = set()
+        self.fired = False
+        for signal in signals:
+            self.pending.add(signal)
+            signal.connect(lambda *args, **kwargs: self.handle_signal(signal))
+
+    def handle_signal(self, signal):
+        self.pending.discard(signal)
+        if not self.fired and not self.pending:
+            self.fire.emit()
+            self.fired = True

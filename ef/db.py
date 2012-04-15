@@ -630,6 +630,7 @@ class FindPhotosWorker(QtCore.QObject):
     def __init__(self, which):
         QtCore.QObject.__init__(self)
         self.which = which
+        self.result = None
 
     @QtCore.pyqtSlot()
     def run(self):
@@ -646,7 +647,11 @@ class FindPhotosWorker(QtCore.QObject):
             id, ok = query.value(0).toInt()
             ids.append(id)
         query.finish()
+        self.result = ids
         self.results.emit(ids)
+
+    def result(self):
+        return self.result
 
 class FindPhotos(QtCore.QObject):
     sig_run = QtCore.pyqtSignal()
@@ -662,6 +667,9 @@ class FindPhotos(QtCore.QObject):
 
     def run(self):
         self.sig_run.emit()
+
+    def result(self):
+        return self.worker.result()
 
 class FetchedPhotoWorker(QtCore.QObject):
     finished = QtCore.pyqtSignal()

@@ -1,16 +1,13 @@
-High priority
--------------
-Show figures for amount of photo cropped and amount of pixels in what's left
+High priority bugs
+------------------
+Upload and fetch have a lot of code in common - build a
+library. Coroutine model would work well as a superclass: let the
+subclass supply the coro and the superclass supply the function
+methods. Also consume netlib this way.
 
-Figure out the number of pixels we need in photos for them to be acceptable
+Handle loss of network gracefully
 
 Do something about signal disconnect bugs
-
-Open image in real editor
-
-Import image files
-
-Filter person list by event
 
 Ensure all database updates are committed before exit
 
@@ -18,55 +15,84 @@ Photos with apostrophe in the url
 
 Error logging
 
-vacuum and backup database on start
-
 Do something with exceptions in the database thread
 
-Photo fetching database logic
+Detect errors when login details wrong
+ - or other badness in eventsforce interactions?
+ - when errors occur during photo uploading that we know are "just retry, EF sucks", retry them
+
+Upload of images that haven't been downloaded? What about reporting of same?
+ - we just need a background download process. Rethink how progress display works
+
+High priority features
+----------------------
+Figure out the number of pixels we need in photos for them to be acceptable
+  - object at <5000 pixels
+  - or...
+  
+  current_ratio = w/h
+  correct_ratio = 6/8
+  if current_ratio > correct_ratio:
+    w2 = w * 6/w = 6
+    h2 = h * 6/w
+    area = h2 * w2 = 6 * 6h/w = 6^2 * h/w
+    full_area = 6*8
+    space_used = 6*6*h/w / (6*8) = 6h/8w
+  
+  if current_ratio < correct_ratio:
+    h2 = h * 8/h = 8
+    w2 = w * 8/h
+    area = 8 * 8 * w/h
+    space_used = 8 * 8 * w/h / (6*8) = 8w/6h
+
+  hence, space_used is 6h/8w, and 1/that if >1
+
+  object when space_used < 0.95
+
+Update local photo after upload
+
+Photo brightness/contract controls
+
+Better browsing
+ - we never really want to see all the people. too clumsy.
+   always going to be by search or filter in practice
+ - almost always filter out 'ok' and 'bad' opinions
+ - screen space limited - modal? Filter first, then hide display while
+   editing?
+ - filter by size/pixel count badness
+ - filter by police status
+ - attendee category
+ - nontrivial predicates of events: find spring attendees who didn't go to autumn
+ - ok, we just want a full boolean expression query, don't we?
+
+Open image in real editor
+
+Import image files
+
+Vacuum and backup database on start
+
+General feature to allow backup
 
 use pyinstaller instead of py2exe
 
-Detect errors when login details wrong
-
-When errors occur during photo uploading that we know are "just retry, EF sucks", retry them
-
 Report on photos with bad sizes, res, or just rejected. Maybe suitable for email shot?
-
-Bad filenames
 
 Think of a way to pick up new registrations quickly. Maybe a report that takes a date?
 
 Multiple simultaneous uploads, for speed? Downloads? Priority of those?
 
-Upload of images that haven't been downloaded? What about reporting of same?
+Redownload of photo if it looks corrupted
+
+Image history
 
 Later
 -----
 Report on bad/unsure images
 
-Better browsing - sort by opinion, size badness, etc
-
-Image history
-
 EF fetch photos should allow "just this person"
 
 When the application crashes to an exception, shut down worker threads before main application (or else they segfault)
 
-Upload and fetch have a lot of code in common - build a
-library. Coroutine model would work well as a superclass: let the
-subclass supply the coro and the superclass supply the function
-methods. Also consume netlib this way.
+Deduplication reports
 
-Better progress indicator?
-
-Open questions
---------------
-Actual image size on badges?
-
-How much wrongness is acceptable?
-
-What about police photo approval?
-
-Eventsforce data model:
- - deduplication mess, what do we do?
- - time of last update?
+Fix abuses of super() by getting rid of them. super() is insane

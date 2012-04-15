@@ -2,8 +2,9 @@ from urllib import urlencode
 from PyQt4 import QtCore, QtNetwork
 import os
 import re
-from types import StringType
-from types import UnicodeType
+from types import StringType, UnicodeType
+from ef.threads import WorkerThread
+
 STRING_TYPES = StringType, UnicodeType
 
 """
@@ -117,7 +118,26 @@ def split_header_words(header_values):
 def encode_form_fields(fields):
     return urlencode(dict([(k,unicode(v).encode('utf-8')) for k,v in fields.items()]))
 
-def qt_form_post(manager, url, fields, file=None):
+manager = None
+manager_worker = None
+
+class ManagerWorker(QtCore.QObject):
+    @QtCore.pyqtSlot()
+    def start(self):
+        global manager
+        manager = QtNetwork.QNetworkAccessManager()
+        #manager.setProxy(QtNetwork.QNetworkProxy(QtNetwork.QNetworkProxy.HttpProxy, '127.0.0.1', 8080))
+
+def start_network_manager():
+    # It requires a silly dance to create an object in a suitable QThread...
+    global manager_worker
+    network_thread = WorkerThread(name='network')
+    manager_worker = ManagerWorker()
+    manager_worker.moveToThread(network_thread)
+    network_thread.started.connect(manager_worker.start)
+    network_thread.start()
+
+def qt_form_post(url, fields, file=None):
     request = QtNetwork.QNetworkRequest(QtCore.QUrl(url))
     if file is None:
         request.setHeader(QtNetwork.QNetworkRequest.ContentTypeHeader, 'application/x-www-form-urlencoded; charset=utf-8')
@@ -140,7 +160,7 @@ def qt_form_post(manager, url, fields, file=None):
         multipart.setParent(reply)
     return reply
 
-def qt_page_get(manager, url):
+def qt_page_get(url):
     request = QtNetwork.QNetworkRequest(QtCore.QUrl(url))
     reply = manager.get(request)
     return reply

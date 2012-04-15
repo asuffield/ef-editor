@@ -1,13 +1,16 @@
 from __future__ import division
 import re
 from PyQt4 import QtCore, QtGui, QtNetwork
-from ef.lib import WorkerThread
+from ef.lib import SignalGroup
 from ef.db import Person, Photo, Registration, Batch, FetchedPhoto, FindPhotos
 from ef.parser import EFDelegateParser
-from bs4 import BeautifulSoup
 import traceback
 import time
 from ef.netlib import qt_form_post, qt_page_get, qt_reply_charset, qt_readall_charset, qt_relative_url
+from ef.nettask import NetFuncs
+from ef.task import Task
+from ef.login import LoginTask, LoginError
+from ef.threads import thread_registry
 
 def catcherror(func):
     def wrapped(self, *args, **kwargs):
@@ -17,20 +20,30 @@ def catcherror(func):
             self.error.emit(traceback.format_exc())
     return wrapped
 
-class UploadTask(QtCore.QObject):
+class UploadTask(Task, NetFuncs):
     completed = QtCore.pyqtSignal(bool)
     error = QtCore.pyqtSignal(str)
 
-    def __init__(self, id, minimum_change, manager, batch):
-        super(QtCore.QObject, self).__init__()
+    def __init__(self, id, minimum_change, batch):
+        Task.__init__(self)
+        NetFuncs.__init__(self)
 
         self.id = id
-        self.manager = manager
         self.batch = batch
         self.person = Person(id)
         self.person.updated.connect(self.person_updated)
         self.reply = None
         self.minimum_change = minimum_change
+        self.skipped = False
+
+        self.task_finished.connect(self.complete)
+        self.task_exception.connect(self.handle_exception)
+
+    def complete(self):
+        self.completed.emit(not self.skipped)
+
+    def handle_exception(self, e):
+        self.error.emit(str(e))
 
     def person_updated(self, origin):
         if origin != 'bind':
@@ -49,7 +62,6 @@ class UploadTask(QtCore.QObject):
 
         # Read in the image
 
-        # XXX: skip images that aren't downloaded? Yes, no cropping without checking
         reader = QtGui.QImageReader(self.photo.full_path())
         image = reader.read()
 
@@ -66,7 +78,20 @@ class UploadTask(QtCore.QObject):
         # Now we need to scale the image, etc...
 
         orig_size = image.width() * image.height()
+        image = self.transform_image(image)
+        new_size = image.width() * image.height()
 
+        size_change = new_size / orig_size
+        if self.photo.rotate == 0 and (100 * abs(1 - size_change)) < self.minimum_change:
+            # This photo hasn't changed enough so we'll skip it
+            self.skipped = True
+            self.completed.emit(False)
+            return
+
+        # Start the process of uploading the edited image to eventsforce
+        self.start_task(image)
+
+    def transform_image(self, image):
         image = image.transformed(QtGui.QTransform().rotate(self.photo.rotate))
         width = image.width()
         height = image.height()
@@ -83,23 +108,7 @@ class UploadTask(QtCore.QObject):
         crop_centre_y = height * self.photo.crop_centre_y
 
         image = image.copy(crop_centre_x - crop_width/2, crop_centre_y - crop_height/2, crop_width, crop_height)
-
-        new_size = image.width() * image.height()
-
-        size_change = new_size / orig_size
-        if (100 * abs(1 - size_change)) < self.minimum_change:
-            # This photo hasn't changed enough so we'll skip it
-            self.completed.emit(False)
-            return
-
-        # Stash the edited image for debugging
-        #writer = QtGui.QImageWriter('out.jpeg', 'jpeg')
-        #writer.setQuality(95)
-        #writer.write(image)
-
-        # Start the process of uploading the edited image to eventsforce
-        self.coro = self.upload(image)
-        self.setup_coro_signals(self.coro.next())
+        return image
 
     def extract_link_from_silly_button(self, button):
         m = re.match(r'document.location=\'(.*)\';', button['onclick'])
@@ -108,29 +117,28 @@ class UploadTask(QtCore.QObject):
             return None
         return m.group(1)
 
-    def submit_form(self, form, user_fields={}, file=None):
-        fields = {}
-        action = form['action']
+    def prepare_file_upload(self, name, image):
+        filename = '%d_%s.jpg' % (self.person.id, self.person.fullname)
+        filename = re.sub(r'[ #?/:]', '_', filename)
 
-        for input in form.find_all('input'):
-            if not input.has_key('name'):
-                continue
-            name = input['name']
-            if input['type'] == 'image':
-                fields['%s.x' % name] = '1'
-                fields['%s.y' % name] = '1'
-            elif input['type'] == 'button':
-                continue
-            elif input.has_key('value'):
-                fields[name] = input['value']
+        buffer = QtCore.QBuffer(self)
+        buffer.open(QtCore.QIODevice.ReadWrite)
+        writer = QtGui.QImageWriter(buffer, 'jpeg')
+        writer.setQuality(95)
+        writer.write(image)
+        buffer.seek(0)
 
-        fields.update(user_fields)
+        # Make sure buffer sticks around while the network operation runs
+        self.buffer = buffer
+        
+        return {'name': name,
+                'filename': filename,
+                'type': 'image/jpeg',
+                'device': buffer,
+                }
 
-        return qt_form_post(self.manager, qt_relative_url(self.reply, action), fields, file)
-
-    def upload(self, image):
-        soup = yield qt_page_get(self.manager,
-                                 'https://www.eventsforce.net/libdems/backend/home/codEditMain.csp?codReadOnly=1&personID=%d&curPage=1' % self.id)
+    def task(self, image):
+        soup = yield self.get('https://www.eventsforce.net/libdems/backend/home/codEditMain.csp?codReadOnly=1&personID=%d&curPage=1' % self.id)
 
         links = soup.find_all('a', href=re.compile(r'^\.\./\.\./frontend/reg/initSession'))
         if not len(links):
@@ -138,13 +146,13 @@ class UploadTask(QtCore.QObject):
             return
 
         link = links[-1]['href']
-        soup = yield qt_page_get(self.manager, qt_relative_url(self.reply, link))
+        soup = yield self.get(link)
 
         edit_button = soup.find('input', type='button', value='Edit')
         link = self.extract_link_from_silly_button(edit_button)
         if link is None:
             return
-        soup = yield qt_page_get(self.manager, qt_relative_url(self.reply, link))
+        soup = yield self.get(link)
 
         while not re.match(r'Photo upload', soup.find_all('h1')[1].text.strip(), re.I):
             soup = yield self.submit_form(soup.form)
@@ -170,25 +178,7 @@ class UploadTask(QtCore.QObject):
         guest_number = m.group(3)
 
         soup = yield self.submit_form(soup.form, {'uploadFile': '1', 'uploadTempPersonID': temp_person_id, 'uploadGuestNumber': guest_number, 'uploadDataID': data_id})
-
-        filename = '%d_%s.jpg' % (self.person.id, self.person.fullname)
-        filename = re.sub(r'[ #?/:]', '_', filename)
-
-        buffer = QtCore.QBuffer(self)
-        buffer.open(QtCore.QIODevice.ReadWrite)
-        writer = QtGui.QImageWriter(buffer, 'jpeg')
-        writer.setQuality(95)
-        writer.write(image)
-        buffer.seek(0)
-
-        # Make sure buffer sticks around while the network operation runs
-        self.buffer = buffer
-        
-        soup = yield self.submit_form(soup.form, {}, {'name': 'FileStream',
-                                                      'filename': filename,
-                                                      'type': 'image/jpeg',
-                                                      'device': buffer,
-                                                      })
+        soup = yield self.submit_form(soup.form, {}, self.prepare_file_upload('FileStream', image))
 
         for script in soup.find_all('script'):
             m = re.match(r'^\s*window\.location=\'(.*)\';', script.text)
@@ -199,12 +189,12 @@ class UploadTask(QtCore.QObject):
             self.error.emit("Upload failed, error link: %s" % link)
             return
 
-        soup = yield qt_page_get(self.manager, qt_relative_url(self.reply, link))
+        soup = yield self.get(link)
 
         ok_button = soup.find('input', type='button', value='OK')
         link = self.extract_link_from_silly_button(ok_button)
 
-        soup = yield qt_page_get(self.manager, qt_relative_url(self.reply, link))
+        soup = yield self.get(link)
 
         link = soup.find('a', href=re.compile(r'^/LIBDEMS/media/delegate_files/'))
         print 'New photo is at', link['href']
@@ -214,47 +204,14 @@ class UploadTask(QtCore.QObject):
 
         final_proceed_button = soup.find('input', type='button', onclick=re.compile(r'gotoReceipt'))
         link = self.extract_link_from_silly_button(final_proceed_button)
-        soup = yield qt_page_get(self.manager, qt_relative_url(self.reply, link))
+        soup = yield self.get(link)
 
         link = soup.find('a', text='CONFIRM')
 
-        soup = yield qt_page_get(self.manager, qt_relative_url(self.reply, link['href']))
+        soup = yield self.get(link['href'])
 
         if not re.search(r'Booking confirmation', soup.find_all('h1')[1].text, re.I):
             self.error.emit('Final page after upload did not look right, did something bad happen?')
-
-    def setup_coro_signals(self, reply):
-        self.reply = reply
-        reply.finished.connect(self.handle_finished)
-
-    def handle_finished(self):
-        if self.reply.error() != QtNetwork.QNetworkReply.NoError:
-            self.error.emit(self.reply.errorString())
-            return
-
-        self.reply.finished.disconnect(self.handle_finished)
-
-        redirect = self.reply.attribute(QtNetwork.QNetworkRequest.RedirectionTargetAttribute)
-        if redirect.isValid():
-            url = qt_relative_url(self.reply, redirect.toString())
-            reply = qt_page_get(self.manager, url)
-            self.setup_coro_signals(reply)
-            return
-
-        try:
-            charset = qt_reply_charset(self.reply)
-            soup = BeautifulSoup(qt_readall_charset(self.reply, charset), 'lxml')
-            reply = self.coro.send(soup)
-            self.setup_coro_signals(reply)
-        except StopIteration:
-            self.completed.emit(True)
-        except:
-            self.error.emit(traceback.format_exc())
-
-    def abort(self):
-        if self.reply is not None and not self.reply.isFinished():
-            self.reply.finished.disconnect(self.handle_finished)
-            self.reply.abort()
 
 class UploadWorker(QtCore.QObject):
     completed = QtCore.pyqtSignal()
@@ -264,17 +221,12 @@ class UploadWorker(QtCore.QObject):
     def __init__(self):
         super(QtCore.QObject, self).__init__()
 
-        self.manager = None
         self.tasks = None
         self.reply = None
 
     @QtCore.pyqtSlot(dict, str, str)
     @catcherror
     def start_upload(self, ids, username, password):
-        if self.manager is None:
-            self.manager = QtNetwork.QNetworkAccessManager()
-            #self.manager.setProxy(QtNetwork.QNetworkProxy(QtNetwork.QNetworkProxy.HttpProxy, '127.0.0.1', 8080))
-
         self.aborted = False
         self.ids = ids
         self.i = 0
@@ -285,67 +237,34 @@ class UploadWorker(QtCore.QObject):
         self.username = username
         self.password = password
         self.percent_filter = 0
+        self.login_task = LoginTask(self.username, self.password)
+        self.login_task.task_exception.connect(self.handle_login_exception)
+        self.login_task.start_task()
+
+        signals = [self.login_task.task_finished]
 
         if self.ids['mode'] == 'good' or self.ids['mode'] == 'percent':
-            self.find_photos = FindPhotos('good')
-            self.find_photos.results.connect(self.photos_ready)
-            self.find_photos.run()
+            self.people = None
             if self.ids['mode'] == 'percent':
                 self.percent_filter = self.ids['filter']
+
+            self.find_photos = FindPhotos('good')
+            signals.append(self.find_photos.results)
         else:
             self.people = self.ids['people']
-            self.login()
+            self.find_photos = None
 
-    def photos_ready(self, people):
-        self.people = people
-        print people
-        self.login()
+        self.ready_group = SignalGroup(*signals)
+        self.ready_group.fire.connect(self.ready)
 
-    def login(self):
+        if self.find_photos is not None:
+            self.find_photos.run()
+
         self.progress.emit('Logging in', 0, 0)
-        reply = qt_page_get(self.manager, 'https://www.eventsforce.net/libdems/backend/home/login.csp')
-        reply.finished.connect(self.got_login_page)
-        self.reply = reply
 
-    def got_login_page(self):
-        if self.reply.error() != QtNetwork.QNetworkReply.NoError:
-            self.error.emit(self.reply.errorString())
-            return
-
-        self.reply.finished.disconnect(self.got_login_page)
-        charset = qt_reply_charset(self.reply)
-        soup = BeautifulSoup(qt_readall_charset(self.reply, charset))
-
-        fields = {}
-        for input in soup.form.find_all('input'):
-            name = input['name']
-            if input['type'] == 'image':
-                fields['%s.x' % name] = '1'
-                fields['%s.y' % name] = '1'
-            else:
-                fields[name] = input['value']
-
-        fields['txtUsername'] = self.username
-        fields['txtPassword'] = self.password
-        
-        reply = qt_form_post(self.manager, qt_relative_url(self.reply, soup.form['action']), fields)
-        reply.finished.connect(self.login_finished)
-        self.reply = reply
-
-    def login_finished(self):
-        if self.reply.error() != QtNetwork.QNetworkReply.NoError:
-            self.error.emit(self.reply.errorString())
-            return
-
-        self.reply.finished.disconnect(self.login_finished)
-
-        redirect = self.reply.attribute(QtNetwork.QNetworkRequest.RedirectionTargetAttribute)
-        if redirect.isValid():
-            url = qt_relative_url(self.reply, redirect.toString())
-            self.reply = qt_page_get(self.manager, url)
-            self.reply.finished.connect(self.login_finished)
-            return
-        
+    def ready(self):
+        if self.people is None:
+            self.people = self.find_photos.result()
         self.next_task()
 
     def next_task(self):
@@ -357,7 +276,7 @@ class UploadWorker(QtCore.QObject):
             return
 
         id = self.people[self.i]
-        self.tasks[id] = UploadTask(id, self.percent_filter, self.manager, self.batch)
+        self.tasks[id] = UploadTask(id, self.percent_filter, self.batch)
         self.tasks[id].completed.connect(self.handle_task_complete)
         self.tasks[id].error.connect(self.handle_error)
 
@@ -370,13 +289,16 @@ class UploadWorker(QtCore.QObject):
     def handle_commit_progress(self, cur, max):
         self.progress.emit('Saving new photo URLs', cur, max)
 
+    def handle_login_exception(self, e, msg):
+        if isinstance(e, LoginError):
+            self.handle_error(str(e))
+        else:
+            self.handle_error(m)
+
     def handle_error(self, err):
         if self.aborted:
             return
         self.aborted = True
-
-        if self.reply is not None and not self.reply.isFinished():
-            self.reply.abort()
 
         self.error.emit(err)
         if self.tasks is not None:
@@ -389,9 +311,8 @@ class Uploader(QtCore.QObject):
     def __init__(self):
         super(QtCore.QObject, self).__init__()
         
-        self.worker = WorkerThread()
         self.uploader = UploadWorker()
-        self.uploader.moveToThread(self.worker)
+        self.uploader.moveToThread(thread_registry.get('network'))
 
         self.sig_start_upload.connect(self.uploader.start_upload)
 
@@ -399,7 +320,5 @@ class Uploader(QtCore.QObject):
         self.error = self.uploader.error
         self.progress = self.uploader.progress
         
-        self.worker.start()
-
     def start_upload(self, ids, username, password):
         self.sig_start_upload.emit(ids, username, password)
