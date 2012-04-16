@@ -25,5 +25,7 @@ class LoginTask(Task, NetFuncs):
         soup = yield self.submit_form(soup.form, {'txtUsername': self.username, 'txtPassword': self.password})
         if soup.find(text=re.compile('Invalid logon')) is not None:
             raise LoginError('Invalid logon')
-        if soup.find('h2') is None:
+        if soup.title is None:
             raise LoginError('Got incomprehensible page from eventsforce after login')
+        if soup.title.text != 'Liberal Democrats':
+            raise LoginError('Got unexpected page title "%s" from eventsforce after login' % soup.title.text)

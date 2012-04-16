@@ -4,6 +4,7 @@ import time
 from PyQt4 import QtCore, QtSql
 from ef.threads import WorkerThread
 from collections import deque, OrderedDict
+from ef.task import Finishable
 
 photodir = None
 
@@ -424,12 +425,13 @@ class DBBase(QtCore.QObject):
     def signal_existing_created(self):
         dbmanager.signal_existing_created(self.__tablename__)
 
-class Batch(QtCore.QObject):
+class Batch(QtCore.QObject, Finishable):
     finished = QtCore.pyqtSignal()
     progress = QtCore.pyqtSignal(int, int)
 
     def __init__(self, parent=None):
         QtCore.QObject.__init__(self)
+        Finishable.__init__(self, self.finished)
 
         self.batch_proxy = BatchProxy()
         self.batch_proxy.moveToThread(dbmanager.worker)
@@ -625,12 +627,12 @@ class FindUnsure(QtCore.QObject):
             callback(int(id))
 
 class FindPhotosWorker(QtCore.QObject):
-    results = QtCore.pyqtSignal(list)
+    finished = QtCore.pyqtSignal()
 
     def __init__(self, which):
         QtCore.QObject.__init__(self)
         self.which = which
-        self.result = None
+        self.ids = None
 
     @QtCore.pyqtSlot()
     def run(self):
@@ -647,15 +649,14 @@ class FindPhotosWorker(QtCore.QObject):
             id, ok = query.value(0).toInt()
             ids.append(id)
         query.finish()
-        self.result = ids
-        self.results.emit(ids)
+        self.ids = ids
+        self.finished.emit()
 
     def result(self):
-        return self.result
+        return self.ids
 
-class FindPhotos(QtCore.QObject):
+class FindPhotos(QtCore.QObject, Finishable):
     sig_run = QtCore.pyqtSignal()
-    results = QtCore.pyqtSignal(list)
 
     def __init__(self, which):
         QtCore.QObject.__init__(self)
@@ -663,7 +664,9 @@ class FindPhotos(QtCore.QObject):
         self.worker = FindPhotosWorker(which)
         self.worker.moveToThread(dbmanager.worker)
         self.sig_run.connect(self.worker.run)
-        self.worker.results.connect(self.results)
+        self.finished = self.worker.finished
+
+        Finishable.__init__(self, self.finished)
 
     def run(self):
         self.sig_run.emit()

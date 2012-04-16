@@ -1,11 +1,12 @@
-from PyQt4 import QtCore, QtGui, QtNetwork
-from ef.lib import WorkerThread
+from PyQt4 import QtCore
 from ef.db import Person, Photo, Event, Registration, FindPhotos, Batch, FetchedPhoto
 from ef.parser import EFDelegateParser
-from bs4 import BeautifulSoup
 import traceback
 import time
-from ef.netlib import qt_form_post, qt_page_get, qt_reply_charset, qt_readall_charset, qt_relative_url
+from ef.threads import thread_registry
+from ef.login import LoginTask, LoginError
+from ef.nettask import NetFuncs
+from ef.task import Task
 
 class PersonDBParser(EFDelegateParser):
     def __init__(self, progress, batch):
@@ -47,205 +48,79 @@ def catcherror(func):
             self.error.emit(traceback.format_exc())
     return wrapped
 
-class FetchTask(QtCore.QObject):
-    start = QtCore.pyqtSignal()
-    error = QtCore.pyqtSignal(str)
-    finished = QtCore.pyqtSignal()
-
+class ReportTask(Task, NetFuncs):
     def __init__(self, worker):
-        QtCore.QObject.__init__(self)
+        Task.__init__(self)
+        NetFuncs.__init__(self)
+
         self.worker = worker
-        self.start.connect(self.main)
-
-    def run(self):
-        pass
-
-    def main(self):
-        self.run()
-
-    def abort(self):
-        pass
-
-    def reply_has_error(self, reply):
-        if reply.error() != QtNetwork.QNetworkReply.NoError:
-            self.error.emit(reply.errorString())
-            return True
-        else:
-            return False
-
-class LoginTask(FetchTask):
-    def __init__(self, worker, username, password):
-        FetchTask.__init__(self, worker)
-        self.username = username
-        self.password = password
-        self.reply = None
-
-    @catcherror
-    def run(self):
-        self.worker.progress.emit('Logging in', 0, 0)
-        reply = qt_form_post(self.worker.manager,
-                             'https://www.eventsforce.net/libdems/backend/home/login2.csp',
-                             {'txtUsername': self.username,
-                              'txtPassword': self.password,
-                              })
-        reply.finished.connect(self.login_finished)
-        self.reply = reply
-
-    def login_finished(self):
-        if not self.reply_has_error(self.reply):
-            self.finished.emit()
-
-    def abort(self):
-        if self.reply is not None and not self.reply.isFinished():
-            self.reply.finished.disconnect()
-            self.reply.abort()
-
-class ReportTask(FetchTask):
-    def __init__(self, worker):
-        FetchTask.__init__(self, worker)
-        self.run_reply = None
-        self.get_reply = None
-        self.charset = None
     
-    @catcherror
-    def run(self):
+    def task(self):
         self.batch = Batch()
         self.parser = PersonDBParser(self.worker.progress, self.batch)
 
         self.worker.progress.emit('Running report', 0, 0)
-        reply = qt_page_get(self.worker.manager,
-                            'https://www.eventsforce.net/libdems/backend/home/dynaRepRun.csp?profileID=62')
-
-        reply.finished.connect(self.report_run_finished)
-        self.run_reply = reply
-
-    @catcherror
-    def report_run_finished(self):
-        if self.reply_has_error(self.run_reply):
-            return
-
-        redirect = self.run_reply.attribute(QtNetwork.QNetworkRequest.RedirectionTargetAttribute)
-        if redirect.isValid():
-            url = qt_relative_url(self.run_reply, redirect.toString())
-            reply = qt_page_get(self.worker.manager, url)
-            reply.finished.connect(self.report_run_finished)
-            self.run_reply = reply
-            return
-
-        charset = qt_reply_charset(self.run_reply)
-        soup = BeautifulSoup(qt_readall_charset(self.run_reply, charset))
-
+        soup = yield self.get('https://www.eventsforce.net/libdems/backend/home/dynaRepRun.csp?profileID=62')
+    
         img = soup.find('img', title='Export to Excel')
         if img is None:
-            self.error.emit("Failed to parse response from eventsforce (didn't have Export link)")
-            return
+            raise FetchError("Failed to parse response from eventsforce (didn't have Export link)")
         link = img.parent
 
         self.worker.progress.emit('Downloading results', 0, 0)
 
-        url = qt_relative_url(self.run_reply, link['href'])
-        reply = qt_page_get(self.worker.manager, url)
-        reply.metaDataChanged.connect(self.report_get_headers)
-        reply.readyRead.connect(self.report_get_data)
-        reply.finished.connect(self.report_get_finished)
+        self.report_op = self.get_raw(link['href'])
+        self.report_op.reply.readyRead.connect(self.report_get_data)
+        yield self.report_op
 
-        self.run_reply = None
-        self.get_reply = reply
+        self.parser.close()
 
-    @catcherror
-    def report_get_headers(self):
-        if self.reply_has_error(self.get_reply):
-            return
+        self.batch.progress.connect(self.handle_commit_progress)
+        self.batch.finish()
 
-        self.charset = qt_reply_charset(self.get_reply)
+        yield self.wait(self.batch)
 
     @catcherror
     def report_get_data(self):
-        if self.reply_has_error(self.get_reply):
-            return
-
-        self.parser.feed(qt_readall_charset(self.get_reply, self.charset))
-
-    @catcherror
-    def report_get_finished(self):
-        if self.reply_has_error(self.get_reply):
-            return
-
-        self.parser.close()
-        self.batch.finished.connect(self.finished)
-        self.batch.progress.connect(self.handle_commit_progress)
-        self.batch.finish()
+        self.parser.feed(self.report_op.result())
 
     def handle_commit_progress(self, cur, max):
         self.worker.progress.emit('Saving people', cur, max)
 
-    def abort(self):
-        if self.run_reply is not None and not self.run_reply.isFinished():
-            self.run_reply.finished.disconnect()
-            self.run_reply.abort()
-        if self.get_reply is not None and not self.get_reply.isFinished():
-            self.get_reply.finished.disconnect()
-            self.get_reply.abort()
+class PhotosTask(Task, NetFuncs):
+    def __init__(self, worker, which, batch):
+        Task.__init__(self)
+        NetFuncs.__init__(self)
 
-class PhotosTask(FetchTask):
-    def __init__(self, worker, which):
-        FetchTask.__init__(self, worker)
-        self.get_reply = None
+        self.worker = worker
         self.which = which
-        self.db_tasks = {}
-        self.batch = Batch()
+        self.batch = batch
 
-    @catcherror
-    def run(self):
-        self.batch.finished.connect(self.finished)
-        self.find_photos = FindPhotos(self.which)
-        self.find_photos.results.connect(self.photos_ready)
-        self.find_photos.run()
+    def task(self):
+        find_photos = FindPhotos(self.which)
+        find_photos.run()
         self.worker.progress.emit('Finding photos', 0, 0)
+        yield self.wait(find_photos)
+        
+        self.db_tasks = []
 
-    @catcherror
-    def photos_ready(self, ids):
-        self.people = ids
-        self.worker.progress.emit('Finding photos', 0, len(self.people))
-        self.i = 0
-        self.run_person()
+        people = find_photos.result()
 
-    def run_person(self):
-        if self.i >= len(self.people):
-            self.batch.finish()
-            self.batch.progress.connect(self.handle_commit_progress)
-            return
+        for i, person_id in enumerate(people):
+            self.worker.progress.emit('Finding photos', i, len(people))
+            soup = yield self.get('https://www.eventsforce.net/libdems/backend/home/codEditMain.csp?codReadOnly=1&personID=%d&curPage=1' % person_id)
+            img = soup.find('img', title='Picture Profile')
+            if img is not None:
+                url = str(self.current.resolve_url(img['src']).toString())
+                fetched = FetchedPhoto(person_id, url, self.batch)
+                self.db_tasks.append(fetched)
+                fetched.run()
 
-        reply = qt_page_get(self.worker.manager,
-                            'https://www.eventsforce.net/libdems/backend/home/codEditMain.csp?codReadOnly=1&personID=%d&curPage=1' % self.people[self.i])
-        reply.finished.connect(self.get_finished)
-        self.get_reply = reply
+        self.batch.finish()
+        self.batch.progress.connect(self.handle_commit_progress)
 
     def handle_commit_progress(self, cur, max):
         self.worker.progress.emit('Saving photo URLs', cur, max)
-
-    @catcherror
-    def get_finished(self):
-        if self.reply_has_error(self.get_reply):
-            return
-
-        charset = qt_reply_charset(self.get_reply)
-        soup = BeautifulSoup(qt_readall_charset(self.get_reply, charset))
-
-        img = soup.find('img', title='Picture Profile')
-        if img is not None:
-            url = str(qt_relative_url(self.get_reply, img['src']).toString())
-            self.db_tasks[self.i] = FetchedPhoto(self.people[self.i], url, self.batch)
-            self.db_tasks[self.i].run()
-        self.worker.progress.emit('Finding photos', self.i, len(self.people))
-
-        self.i = self.i + 1
-        self.run_person()
-
-    def abort(self):
-        if self.get_reply is not None and not self.get_reply.isFinished():
-            self.get_reply.finished.disconnect()
-            self.get_reply.abort()
 
 class FetchWorker(QtCore.QObject):
     completed = QtCore.pyqtSignal()
@@ -256,31 +131,35 @@ class FetchWorker(QtCore.QObject):
         super(QtCore.QObject, self).__init__()
 
         self.tasks = None
-        self.manager = None
 
     @QtCore.pyqtSlot(bool, str, str, str)
     @catcherror
     def start_fetch(self, fetch_report, fetch_photos, username, password):
-        if self.manager is None:
-            self.manager = QtNetwork.QNetworkAccessManager()
-
-        self.tasks = tasks = [LoginTask(self, username, password)]
+        self.batch = Batch()
+        self.tasks = tasks = [LoginTask(username, password)]
         if fetch_report:
             tasks.append(ReportTask(self))
         if fetch_photos != 'none':
-            tasks.append(PhotosTask(self, fetch_photos))
+            tasks.append(PhotosTask(self, fetch_photos, self.batch))
 
         prev = None
         for task in tasks:
             if prev is not None:
-                prev.finished.connect(task.start)
-            task.error.connect(self.handle_error)
+                prev.task_finished.connect(task.start_task)
+            task.task_exception.connect(self.handle_exception)
             prev = task
-        prev.finished.connect(self.completed)
-        tasks[0].start.emit()
+        prev.task_finished.connect(self.batch.finish)
+        self.batch.finished.connect(self.completed)
 
-    def handle_error(self, err):
-        self.error.emit(err)
+        self.progress.emit('Logging in', 0, 0)
+        tasks[0].start_task()
+
+    def handle_exception(self, e, msg):
+        if isinstance(e, LoginError):
+            self.error.emit(str(e))
+        else:
+            self.error.emit(msg)
+
         if self.tasks is not None:
             for task in self.tasks:
                 task.abort()
@@ -291,9 +170,8 @@ class Fetcher(QtCore.QObject):
     def __init__(self):
         super(QtCore.QObject, self).__init__()
         
-        self.worker = WorkerThread()
         self.fetcher = FetchWorker()
-        self.fetcher.moveToThread(self.worker)
+        self.fetcher.moveToThread(thread_registry.get('network'))
 
         self.sig_start_fetch.connect(self.fetcher.start_fetch)
 
@@ -304,7 +182,5 @@ class Fetcher(QtCore.QObject):
         self.error = self.fetcher.error
         self.progress = self.fetcher.progress
         
-        self.worker.start()
-
     def start_fetch(self, fetch_report, fetch_photos, username, password):
         self.sig_start_fetch.emit(fetch_report, fetch_photos, username, password)

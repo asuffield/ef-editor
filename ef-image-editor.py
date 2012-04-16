@@ -10,7 +10,8 @@ from ef.ui.editor import Ui_ImageEdit
 from ef.ui.fetch_wizard import Ui_LoadPeopleWizard
 from ef.ui.upload_wizard import Ui_UploadPeopleWizard
 from ef.db import Person, Photo, setup_session, FindUnsure, dbmanager
-from ef.lib import PhotoCache
+from ef.photocache import PhotoCache
+from ef.photodownload import PhotoDownloader
 from ef.fetch import Fetcher
 from ef.upload import Uploader
 from ef.threads import thread_registry
@@ -107,8 +108,7 @@ class ImageListItem(QtGui.QStandardItem):
                                     self.photo.full_path(),
                                     self.photo.url,
                                     ready_cb=self.handle_photo_ready,
-                                    fail_cb=self.handle_photo_fail,
-                                    scale_size=self.thumbnail_size)
+                                    fail_cb=self.handle_photo_fail)
         self.loading = True
         return None
 
@@ -258,8 +258,9 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         self.back.setDisabled(True)
         self.forwards.setDisabled(True)
 
-        self.list_photo_cache = PhotoCache(100)
-        self.main_photo_cache = PhotoCache(10)
+        self.photodownloader = PhotoDownloader()
+        self.list_photo_cache = PhotoCache(self.photodownloader, 100, scale_size=QtCore.QSize(60, 80))
+        self.main_photo_cache = PhotoCache(self.photodownloader, 10)
         self.unsure = FindUnsure()
         self.fetcher = Fetcher()
         self.uploader = Uploader()
@@ -459,7 +460,7 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
             self.load_person(item.data(QtCore.Qt.UserRole))
 
     """Load this person's photo into the editor"""
-    def load_person(self, id):
+    def load_person(self, id, refresh=False):
         p = self.image_list_items[id].person
         photo = self.image_list_items[id].photo
 
@@ -483,6 +484,7 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
             self.main_photo_cache.load_image(photo.id, photo.full_path(), photo.url,
                                              ready_cb=self.handle_photo_ready,
                                              fail_cb=self.handle_photo_fail,
+                                             urgent=True, refresh=refresh,
                                              )
 
     """Select this id in personList"""

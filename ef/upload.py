@@ -1,12 +1,9 @@
 from __future__ import division
 import re
-from PyQt4 import QtCore, QtGui, QtNetwork
+from PyQt4 import QtCore, QtGui
 from ef.lib import SignalGroup
 from ef.db import Person, Photo, Registration, Batch, FetchedPhoto, FindPhotos
-from ef.parser import EFDelegateParser
 import traceback
-import time
-from ef.netlib import qt_form_post, qt_page_get, qt_reply_charset, qt_readall_charset, qt_relative_url
 from ef.nettask import NetFuncs
 from ef.task import Task
 from ef.login import LoginTask, LoginError

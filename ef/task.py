@@ -14,6 +14,34 @@ class TaskOp(QtCore.QObject):
     def result(self):
         return None
 
+class Finishable(object):
+    def __init__(self, signal):
+        self.finish_signal = signal
+        self.finish_signal.connect(self.handle_finished_signal)
+        self.has_finished = False
+
+    def handle_finished_signal(self):
+        self.has_finished = True
+    
+    def is_finished(self):
+        return self.has_finished
+
+class SignalWaitOp(TaskOp):
+    def __init__(self, signal):
+        TaskOp.__init__(self)
+
+        self.signal = signal
+        self.signal.connect(self.finished)
+
+class FinishableWaitOp(TaskOp):
+    def __init__(self, finishable):
+        TaskOp.__init__(self)
+        self.finishable = finishable
+        if self.finishable.is_finished():
+            self.finished.emit()
+        else:
+            self.finishable.finish_signal.connect(self.finished)
+    
 class Task(QtCore.QObject):
     task_finished = QtCore.pyqtSignal()
     task_aborted = QtCore.pyqtSignal()
@@ -28,6 +56,7 @@ class Task(QtCore.QObject):
         self.task_coro = None
         self.current = None
         self.previous_op = None
+        self.is_connected = False
 
     @QtCore.pyqtSlot()
     def start_task(self, *args, **kwargs):
@@ -35,12 +64,18 @@ class Task(QtCore.QObject):
         self.continue_task(lambda: self.task_coro.next())
 
     def connect_coro(self):
+        if self.is_connected or self.current is None:
+            return
         self.current.finished.connect(self.handle_finished)
         self.current.exception.connect(self.handle_exception)
+        self.is_connected = True
 
     def disconnect_coro(self):
+        if not self.is_connected or self.current is None:
+            return
         self.current.finished.disconnect(self.handle_finished)
         self.current.exception.disconnect(self.handle_exception)
+        self.is_connected = False
 
     def continue_task(self, continuation):
         try:
@@ -78,8 +113,15 @@ class Task(QtCore.QObject):
         # allow the coroutine to handle the exception
         self.continue_task(lambda: self.task_coro.throw(e))
 
+    def wait(self, until):
+        if isinstance(until, Finishable):
+            return FinishableWaitOp(until)
+        else:
+            return SignalWaitOp(until)
+
     @QtCore.pyqtSlot()
     def abort(self):
         self.disconnect_coro()
-        self.current.abort()
+        if self.current is not None:
+            self.current.abort()
         self.task_aborted.emit()

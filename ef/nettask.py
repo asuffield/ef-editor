@@ -99,7 +99,7 @@ class NetFuncs(object):
         return self._net_op(lambda url: HTMLOp(qt_page_get(url)), url)
 
     def get_raw(self, url):
-        return self._net_op(lambda url: QNetworkReply(qt_page_get(url)), url)
+        return self._net_op(lambda url: QNetworkReplyOp(qt_page_get(url)), url)
 
     def post(self, url, *args, **kwargs):
         return self._net_op(lambda url, *args, **kwargs: HTMLOp(qt_form_post(url, *args, **kwargs)), url, *args, **kwargs)
