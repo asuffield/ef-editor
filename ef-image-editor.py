@@ -20,13 +20,14 @@ from collections import deque
 from datetime import datetime
 
 class ImageListItem(QtGui.QStandardItem):
-    def __init__(self, photo_cache, person_id):
+    def __init__(self, downloader, photo_cache, person_id):
         QtGui.QStandardItem.__init__(self)
 
         self.person = Person(person_id)
         self.person.updated.connect(self.person_updated)
         self.photo = None
         self.photo_cache = photo_cache
+        self.downloader = downloader
         self.photo_cannot_load = False
         self.loading = False
 
@@ -78,6 +79,7 @@ class ImageListItem(QtGui.QStandardItem):
             return
         self.loading = False
         self.photo_cannot_load = False
+        self.downloader.download_photo(self.photo.id, self.photo.url, self.photo.full_path(), background=True)
         self.emitDataChanged()
 
     def handle_photo_ready(self, id, image):
@@ -350,18 +352,31 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         self.status_timer = QtCore.QTimer(self)
         self.status_timer.setInterval(500)
         self.status_timer.timeout.connect(self.status_timer_update)
+        self.status_is_idle = True
+
+        self.photodownloader.queue_size.connect(self.status_downloader)
 
         self.status_idle()
 
     def status_idle(self):
         self.progress.reset()
         self.progress.hide()
-        self.status.setText('Idle')
+        self.status_is_idle = True
+        self.status_downloader()
+
+    def status_downloader(self):
+        if self.status_is_idle:
+            downloads = self.photodownloader.get_queue_size()
+            if downloads > 0:
+                self.status.setText('Downloading %d images' % downloads)
+            else:
+                self.status.setText('Idle')
 
     def status_start(self, task, max):
         self.status_expiry_timer.stop()
         self.progress.setRange(0, max)
         self.progress.show()
+        self.status_is_idle = False
 
         if max == 0:
             if self.status_started is None:
@@ -719,7 +734,7 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         if table == 'person':
             # This abstraction is very leaky - can't preserve type information through ef.db
             id, ok = key['id'].toInt()
-            item = self.image_list_items[id] = ImageListItem(self.list_photo_cache, id)
+            item = self.image_list_items[id] = ImageListItem(self.photodownloader, self.list_photo_cache, id)
             self.person_model.appendRow(item)
 
     def handle_openeventsforce(self):

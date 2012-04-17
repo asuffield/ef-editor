@@ -50,8 +50,9 @@ class PhotoDownloadWorker(QtCore.QObject):
         queue[id] = {'id': id, 'url': url, 'filename': filename}
         if urgent:
             self.queue['urgent'] = id
-        if not background:
-            # If it just got added to the normal priority queue, don't background-load it
+
+        # Flatten out duplicate background loads, however they got here (lots of ways that can happen)
+        if self.queue['normal'].has_key(id):
             self.queue['background'].pop(id, None)
 
         self.start_task()
@@ -69,9 +70,9 @@ class PhotoDownloadWorker(QtCore.QObject):
             self.queue['urgent'] = None
         if item is None:
             for queue in [self.queue['normal'], self.queue['background']]:
-                if not queue:
-                    continue
-                id, item = queue.popitem(last=False)
+                if queue:
+                    id, item = queue.popitem(last=False)
+                    break
         if item is None:
             return
 

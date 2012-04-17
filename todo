@@ -1,10 +1,5 @@
 High priority bugs
 ------------------
-Upload and fetch have a lot of code in common - build a
-library. Coroutine model would work well as a superclass: let the
-subclass supply the coro and the superclass supply the function
-methods. Also consume netlib this way.
-
 Handle loss of network gracefully
 
 Do something about signal disconnect bugs
