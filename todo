@@ -2,8 +2,6 @@ High priority bugs
 ------------------
 Handle loss of network gracefully
 
-Do something about signal disconnect bugs
-
 Ensure all database updates are committed before exit
 
 Photos with apostrophe in the url
@@ -15,9 +13,6 @@ Do something with exceptions in the database thread
 Detect errors when login details wrong
  - or other badness in eventsforce interactions?
  - when errors occur during photo uploading that we know are "just retry, EF sucks", retry them
-
-Upload of images that haven't been downloaded? What about reporting of same?
- - we just need a background download process. Rethink how progress display works
 
 High priority features
 ----------------------

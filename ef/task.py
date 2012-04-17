@@ -2,11 +2,30 @@ from PyQt4 import QtCore
 import traceback
 
 class TaskOp(QtCore.QObject):
-    finished = QtCore.pyqtSignal()
-    exception = QtCore.pyqtSignal(Exception)
+    _finished = QtCore.pyqtSignal(int)
+    _exception = QtCore.pyqtSignal(Exception, int)
     
     def __init__(self):
         super(TaskOp, self).__init__()
+        self.op_id = None
+
+    def set_op_id(self, op_id):
+        self.op_id = op_id
+
+    def get_op_id(self):
+        return self.op_id
+
+    @QtCore.pyqtSlot()
+    def finish(self):
+        self._finished.emit(self.op_id)
+
+    @QtCore.pyqtSlot(Exception)
+    def throw(self, e):
+        self._exception.emit(e, self.op_id)
+
+    @QtCore.pyqtSlot(Exception, int)
+    def rethrow(self, e, op_id):
+        self.throw(e)
 
     def abort(self):
         pass
@@ -31,16 +50,16 @@ class SignalWaitOp(TaskOp):
         TaskOp.__init__(self)
 
         self.signal = signal
-        self.signal.connect(self.finished)
+        self.signal.connect(self.finish)
 
 class FinishableWaitOp(TaskOp):
     def __init__(self, finishable):
         TaskOp.__init__(self)
         self.finishable = finishable
         if self.finishable.is_finished():
-            self.finished.emit()
+            self.finish()
         else:
-            self.finishable.finish_signal.connect(self.finished)
+            self.finishable.finish_signal.connect(self.finish)
     
 class Task(QtCore.QObject):
     task_finished = QtCore.pyqtSignal()
@@ -58,6 +77,8 @@ class Task(QtCore.QObject):
         self.previous_op = None
         self.is_connected = False
 
+        self.op_id = 1
+
     @QtCore.pyqtSlot()
     def start_task(self, *args, **kwargs):
         self.task_coro = self.task(*args, **kwargs)
@@ -66,15 +87,17 @@ class Task(QtCore.QObject):
     def connect_coro(self):
         if self.is_connected or self.current is None:
             return
-        self.current.finished.connect(self.handle_finished)
-        self.current.exception.connect(self.handle_exception)
+        self.current.set_op_id(self.op_id)
+        op_id = self.op_id = self.op_id + 1
+        self.current._finished.connect(self.handle_finished)
+        self.current._exception.connect(self.handle_exception)
         self.is_connected = True
 
     def disconnect_coro(self):
         if not self.is_connected or self.current is None:
             return
-        self.current.finished.disconnect(self.handle_finished)
-        self.current.exception.disconnect(self.handle_exception)
+        self.current._finished.disconnect(self.handle_finished)
+        self.current._exception.disconnect(self.handle_exception)
         self.is_connected = False
 
     def continue_task(self, continuation):
@@ -100,12 +123,19 @@ class Task(QtCore.QObject):
         except Exception, e:
             self.task_exception.emit(e, traceback.format_exc())
 
-    def handle_finished(self):
+    def handle_finished(self, op_id):
+        if op_id != self.current.get_op_id():
+            # Stray signal from a previous op
+            return
         self.disconnect_coro()
         result = self.current.result()
         self.continue_task(lambda: self.task_coro.send(result))
 
-    def handle_exception(self, e):
+    def handle_exception(self, op_id, e):
+        if op_id != self.current.get_op_id():
+            # Stray signal from a previous op
+            return
+
         self.disconnect_coro()
 
         # We've got an exception. We want to throw it through the

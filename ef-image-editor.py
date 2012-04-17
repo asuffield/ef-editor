@@ -1,4 +1,4 @@
-#!/usr/bin/python -d
+#!/usr/bin/python
 
 from __future__ import division
 
@@ -300,13 +300,13 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         self.person_model_proxy.setSortRole(QtCore.Qt.UserRole+1)
         self.person_model_proxy.sort(0)
 
-        self.personList.setModel(self.person_model_proxy)
+        self.person_list.setModel(self.person_model_proxy)
         self.person_model.itemChanged.connect(self.handle_model_item_changed)
 
         dbmanager.created.connect(self.handle_db_created)
         Person.signal_existing_created()
 
-        self.personList.selectionModel().currentChanged.connect(self.handle_select)
+        self.person_list.selectionModel().currentChanged.connect(self.handle_select)
         self.output_updated.connect(self.handle_crop)
         self.wheel_event.connect(self.crop_frame.handle_wheel)
         self.opinion_ok.clicked.connect(self.handle_opinion_ok)
@@ -470,7 +470,7 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
 
     def handle_model_item_changed(self, item):
         # If this item is the currently selected item...
-        if self.person_model_proxy.mapFromSource(item.index()) == self.personList.selectionModel().currentIndex():
+        if self.person_model_proxy.mapFromSource(item.index()) == self.person_list.selectionModel().currentIndex():
             # ...then just reload the person
             self.load_person(item.data(QtCore.Qt.UserRole))
 
@@ -502,7 +502,7 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
                                              urgent=True, refresh=refresh,
                                              )
 
-    """Select this id in personList"""
+    """Select this id in person_list"""
     def select_person(self, id):
         index = self.image_list_items[id].index()
         if not index.isValid():
@@ -510,7 +510,7 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         index = self.person_model_proxy.mapFromSource(index)
         if not index.isValid():
             return False
-        self.personList.selectionModel().setCurrentIndex(index, QtGui.QItemSelectionModel.ClearAndSelect)
+        self.person_list.selectionModel().setCurrentIndex(index, QtGui.QItemSelectionModel.ClearAndSelect)
         return True
 
     """Get us to this id, in whatever way makes sense"""

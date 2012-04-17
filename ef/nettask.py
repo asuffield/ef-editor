@@ -23,8 +23,11 @@ class QNetworkReplyOp(TaskOp):
         self.finish_processed = False
 
         if redirecter is not None:
-            self.finished.connect(redirecter.finished)
-            self.exception.connect(redirecter.exception)
+            self._finished.connect(redirecter.finish)
+            self._exception.connect(redirecter.rethrow)
+
+    def __str__(self):
+        return 'QNetworkReply(%s)' % self.reply.url().toString()
 
     def resolve_url(self, relative_url):
         if self.redirected_to is not None:
@@ -61,17 +64,17 @@ class QNetworkReplyOp(TaskOp):
         self.finish_processed = True
 
         if self.reply.error() != QtNetwork.QNetworkReply.NoError:
-            self.exception.emit(NetworkError(self.reply.errorString()))
+            self.throw(NetworkError(self.reply.errorString()))
             return
 
         redirect = self.reply.attribute(QtNetwork.QNetworkRequest.RedirectionTargetAttribute)
         if redirect.isValid():
             url = self.resolve_url(redirect.toString())
             reply = self.reply.manager().get(QtNetwork.QNetworkRequest(url))
-            self.redirected_to = QNetworkReplyOp(reply, self)
+            self.redirected_to = QNetworkReplyOp(reply, redirecter=self)
             return
 
-        self.finished.emit()
+        self.finish()
 
     def abort(self):
         self.finish_processed = True
