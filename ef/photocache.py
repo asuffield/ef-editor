@@ -64,6 +64,7 @@ class PhotoCache(QtCore.QObject):
         self.downloader.error.connect(self._download_error)
         self.start_loading.connect(self.loader.load_image)
 
+        self.worker.please_exit.connect(self.worker.exit)
         self.worker.start()
         
     def load_image(self, id, filename, url, ready_cb=None, fail_cb=None, refresh=False, urgent=False, background=False):

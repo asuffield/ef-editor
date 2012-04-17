@@ -15,7 +15,7 @@ class ThreadRegistry(QtCore.QObject):
 
     def shutdown(self, rc):
         for thread in self.threads.itervalues():
-            thread.exit(rc)
+            thread.please_exit.emit(rc)
 
     def get(self, name):
         return self.threads[name]
@@ -23,6 +23,8 @@ class ThreadRegistry(QtCore.QObject):
 thread_registry = ThreadRegistry()
 
 class WorkerThread(QtCore.QThread):
+    please_exit = QtCore.pyqtSignal(int)
+    
     def __init__(self, *args, **kwargs):
         id = kwargs.pop('name', self)
         QtCore.QThread.__init__(self, *args, **kwargs)

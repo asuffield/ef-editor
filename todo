@@ -1,7 +1,5 @@
 High priority bugs
 ------------------
-Ensure all database updates are committed before exit
-
 Photos with apostrophe in the url
 
 Error logging

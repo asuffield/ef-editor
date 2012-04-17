@@ -66,7 +66,15 @@ class DBWorker(QtCore.QObject):
         self.ticker.timeout.connect(self.timeout)
         self.ticker.start()
 
+    @QtCore.pyqtSlot(int)
+    def exit(self, rc):
+        self.process_queues(-1)
+        QtCore.QThread.currentThread().exit(rc)
+
     def timeout(self):
+        self.process_queues(200)
+
+    def process_queues(self, timeout):
         timer = QtCore.QElapsedTimer()
         timer.start()
 
@@ -75,13 +83,13 @@ class DBWorker(QtCore.QObject):
         db = QtSql.QSqlDatabase.database()
         db.transaction()
         try:
-            while self.insert_queue and not timer.hasExpired(200):
+            while self.insert_queue and not timer.hasExpired(timeout):
                 queued = self.insert_queue.popleft()
                 self.do_insert(queued['table'], queued['values'], queued['origin'])
                 for k,v in queued['batches'].iteritems():
                     batches[k] = v + batches.get(k, 0)
                 
-            while self.write_cache and not timer.hasExpired(200):
+            while self.write_cache and not timer.hasExpired(timeout):
                 k, queued = self.write_cache.popitem(last=False)
                 table,key = k
                 if queued['upsert']:
@@ -312,6 +320,7 @@ class DBManager(QtCore.QObject):
         self.dbworker.created.connect(self.created)
         self.dbworker.pending.connect(self.handle_pending)
         self.worker.started.connect(self.dbworker.setup)
+        self.worker.please_exit.connect(self.dbworker.exit)
 
         self.pending_op_count = 0
         self.classes = {}

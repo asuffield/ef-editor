@@ -135,6 +135,7 @@ def start_network_manager():
     manager_worker = ManagerWorker()
     manager_worker.moveToThread(network_thread)
     network_thread.started.connect(manager_worker.start)
+    network_thread.please_exit.connect(network_thread.exit)
     network_thread.start()
 
 def qt_form_post(url, fields, file=None):
