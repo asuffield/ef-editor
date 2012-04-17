@@ -28,7 +28,7 @@ class ImageListItem(QtGui.QStandardItem):
         self.photo = None
         self.photo_cache = photo_cache
         self.downloader = downloader
-        self.photo_cannot_load = False
+        self.photo_load_retries = 0
         self.loading = False
 
         self.size_hint = QtCore.QSize(80, 160)
@@ -71,14 +71,14 @@ class ImageListItem(QtGui.QStandardItem):
             self.photo.updated.disconnect(self.photo_updated)
         self.photo = Photo(self.person.current_photo_id)
         self.photo.updated.connect(self.photo_updated)
-        self.photo_cannot_load = False
+        self.photo_load_retries = 0
         self.emitDataChanged()
 
     def photo_updated(self, origin):
         if origin == 'CropFrame':
             return
         self.loading = False
-        self.photo_cannot_load = False
+        self.photo_load_retries = 0
         self.downloader.download_photo(self.photo.id, self.photo.url, self.photo.full_path(), background=True)
         self.emitDataChanged()
 
@@ -88,11 +88,11 @@ class ImageListItem(QtGui.QStandardItem):
 
     def handle_photo_fail(self, id, error):
         self.loading = False
-        self.photo_cannot_load = True
+        self.photo_load_retries = self.photo_load_retries + 1
         self.emitDataChanged()
 
     def get_photo(self):
-        if self.photo_cannot_load or self.photo is None or self.loading:
+        if self.photo_load_retries > 3 or self.photo is None or self.loading:
             return None
 
         pixmap = self.photo_cache.peek_image(self.photo.id)

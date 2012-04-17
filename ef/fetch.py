@@ -60,7 +60,7 @@ class ReportTask(Task, NetFuncs):
         self.parser = PersonDBParser(self.worker.progress, self.batch)
 
         self.worker.progress.emit('Running report', 0, 0)
-        soup = yield self.get('https://www.eventsforce.net/libdems/backend/home/dynaRepRun.csp?profileID=62')
+        soup = yield self.get('https://www.eventsforce.net/libdems/backend/home/dynaRepRun.csp?profileID=62', timeout=None)
     
         img = soup.find('img', title='Export to Excel')
         if img is None:
@@ -69,7 +69,7 @@ class ReportTask(Task, NetFuncs):
 
         self.worker.progress.emit('Downloading results', 0, 0)
 
-        self.report_op = self.get_raw(link['href'])
+        self.report_op = self.get_raw(link['href'], timeout=120)
         self.report_op.reply.readyRead.connect(self.report_get_data)
         yield self.report_op
 

@@ -1,7 +1,5 @@
 High priority bugs
 ------------------
-Handle loss of network gracefully
-
 Ensure all database updates are committed before exit
 
 Photos with apostrophe in the url
@@ -54,6 +52,7 @@ Better browsing
  - attendee category
  - nontrivial predicates of events: find spring attendees who didn't go to autumn
  - ok, we just want a full boolean expression query, don't we?
+ - export reports of queries to spreadsheet
 
 Open image in real editor
 
@@ -64,8 +63,6 @@ Vacuum and backup database on start
 General feature to allow backup
 
 use pyinstaller instead of py2exe
-
-Report on photos with bad sizes, res, or just rejected. Maybe suitable for email shot?
 
 Think of a way to pick up new registrations quickly. Maybe a report that takes a date?
 
