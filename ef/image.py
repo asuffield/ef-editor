@@ -4,7 +4,12 @@ import Image
 from ImageQt import ImageQt
 import math
 
-def make_lut(brightness, contrast):
+def make_lut(gamma, brightness, contrast):
+    if gamma != 1:
+        ga_fun = lambda x: x ** (1/gamma)
+    else:
+        ga_fun = lambda x: x
+    
     # Algorithm lifted from gimp
     if brightness < 0:
         br_fun = lambda x: x * (1 + brightness)
@@ -14,7 +19,7 @@ def make_lut(brightness, contrast):
         br_fun = lambda x: x
     slant = math.tan((contrast + 1) * math.pi/4)
     cr_fun = lambda x: (x - 0.5) * slant + 0.5
-    return lambda x: 256 * cr_fun(br_fun(x/256))
+    return lambda x: 256 * cr_fun(br_fun(ga_fun(x/256)))
 
 class PhotoImage(QtCore.QObject):
     changed = QtCore.pyqtSignal()
@@ -24,6 +29,7 @@ class PhotoImage(QtCore.QObject):
         
         self.image = image
         self.rotation = self.brightness = self.contrast = 0
+        self.gamma = 1
         self.crop_centre = 0.5, 0.5
         self.crop_scale = 1
         self.crop = False
@@ -41,6 +47,10 @@ class PhotoImage(QtCore.QObject):
 
     def set_contrast(self, v):
         self.contrast = v
+        self.changed.emit()
+
+    def set_gamma(self, v):
+        self.gamma = v
         self.changed.emit()
 
     def set_crop(self, state):
@@ -79,8 +89,8 @@ class PhotoImage(QtCore.QObject):
         # We don't want the alpha channel modified by the lut
         image_mask = image.split()[3]
 
-        if self.brightness or self.contrast:
-            image = image.point(make_lut(self.brightness, self.contrast))
+        if self.brightness or self.contrast or self.gamma:
+            image = image.point(make_lut(self.gamma, self.brightness, self.contrast))
 
         # This little hack creates a white background of the same
         # size, then copies all the pixels with non-zero alpha values

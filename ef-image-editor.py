@@ -340,6 +340,12 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         self.rotate_l180.clicked.connect(lambda: self.rotate.setValue(-180))
         self.rotate_r90.clicked.connect(lambda: self.rotate.setValue(90))
         self.rotate_r180.clicked.connect(lambda: self.rotate.setValue(180))
+        self.brightness_slider.valueChanged.connect(self.handle_brightness)
+        self.contrast_slider.valueChanged.connect(self.handle_contrast)
+
+        self.gamma_slider.valueChanged.connect(lambda v: self.gamma_spin.setValue(v/10))
+        self.gamma_spin.valueChanged.connect(lambda v: self.gamma_slider.setValue(v*10))
+        self.gamma_slider.valueChanged.connect(self.handle_gamma)
 
         self.action_openeventsforce.triggered.connect(self.handle_openeventsforce)
 
@@ -353,6 +359,12 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         self.status_timer.setInterval(500)
         self.status_timer.timeout.connect(self.status_timer_update)
         self.status_is_idle = True
+
+        self.draw_timer = QtCore.QTimer(self)
+        self.draw_timer.setInterval(50)
+        self.draw_timer.timeout.connect(self.handle_draw)
+        self.draw_timer.start()
+        self.image_draw_needed = False
 
         self.photodownloader.queue_size.connect(self.status_downloader)
 
@@ -417,6 +429,7 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         self.current_person = None
         self.current_photo = None
         self.current_image = None
+        self.image_draw_needed = False
         self.crop_frame.hide()
         self.main_pixmap.hide()
         self.preview_image.setPixmap(QtGui.QPixmap())
@@ -472,8 +485,20 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
     def handle_model_item_changed(self, item):
         # If this item is the currently selected item...
         if self.person_model_proxy.mapFromSource(item.index()) == self.person_list.selectionModel().currentIndex():
-            # ...then just reload the person
-            self.load_person(item.data(QtCore.Qt.UserRole))
+            # ...fish out the relevant data...
+            person_id = item.data(QtCore.Qt.UserRole)
+
+            p = self.image_list_items[person_id].person
+            photo = self.image_list_items[person_id].photo
+
+            # ...and see if it's the same thing we've already loaded
+            if (self.current_person is not None and self.current_photo is not None
+                and p.id == self.current_person.id and photo.id == self.current_photo.id):
+                # If it's the same, just redraw the image to pick up photo control changes
+                self.image_draw_needed = True
+            else:
+                # For anything else just reload the person
+                self.load_person(person_id)
 
     """Load this person's photo into the editor"""
     def load_person(self, id, refresh=False):
@@ -567,7 +592,11 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         image.set_rotation(self.current_photo.rotate)
 
         self.current_image = image
-        self.setup_photo()
+        self.image_draw_needed = True
+
+    def handle_draw(self):
+        if self.image_draw_needed and self.current_image is not None:
+            self.setup_photo()
 
     def setup_photo(self):
         # Suppress re-entrant noise, because loading a photo emits
@@ -595,6 +624,8 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         elif opinion == 'unsure':
             self.opinion_unsure.setChecked(True)
 
+        self.image_draw_needed = False
+
         # Now fire off an update event to get the preview drawn
         self.loading_now = False
         self.handle_crop()
@@ -619,8 +650,24 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
 
     def handle_rotate(self, angle):
         if self.current_image is not None and not self.loading_now:
-            self.setup_photo()
+            self.image_draw_needed = True
+            self.current_image.set_rotation(angle)
             self.current_photo.update_rotation(angle)
+
+    def handle_brightness(self, brightness):
+        if self.current_image is not None and not self.loading_now:
+            self.image_draw_needed = True
+            self.current_image.set_brightness(brightness / 127)
+
+    def handle_contrast(self, contrast):
+        if self.current_image is not None and not self.loading_now:
+            self.image_draw_needed = True
+            self.current_image.set_contrast(contrast / 127)
+
+    def handle_gamma(self, gamma):
+        if self.current_image is not None and not self.loading_now:
+            self.image_draw_needed = True
+            self.current_image.set_gamma(gamma / 10)
 
     def handle_next_unsure(self):
         self.next_unchecked.setDisabled(True)
