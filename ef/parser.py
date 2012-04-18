@@ -55,9 +55,6 @@ class EFParser(HTMLParser):
     def handle_record(self, record):
         pass
 
-    #def get_data(self):
-    #    return self.data
-
 class EFDelegateParser(EFParser):
     people = {}
     events_map = {}

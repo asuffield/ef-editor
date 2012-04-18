@@ -37,7 +37,7 @@ Figure out the number of pixels we need in photos for them to be acceptable
 
 Update local photo after upload
 
-Photo brightness/contract controls
+Photo brightness/contrast controls
 
 Better browsing
  - we never really want to see all the people. too clumsy.
@@ -72,8 +72,6 @@ Image history
 
 Later
 -----
-Report on bad/unsure images
-
 EF fetch photos should allow "just this person"
 
 When the application crashes to an exception, shut down worker threads before main application (or else they segfault)
@@ -81,3 +79,5 @@ When the application crashes to an exception, shut down worker threads before ma
 Deduplication reports
 
 Fix abuses of super() by getting rid of them. super() is insane
+
+Purge habitual getters/setters

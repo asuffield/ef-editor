@@ -10,7 +10,7 @@ from ef.ui.editor import Ui_ImageEdit
 from ef.ui.fetch_wizard import Ui_LoadPeopleWizard
 from ef.ui.upload_wizard import Ui_UploadPeopleWizard
 from ef.db import Person, Photo, setup_session, FindUnsure, dbmanager
-from ef.photocache import PhotoCache
+from ef.photocache import ThumbnailCache, PhotoImageCache
 from ef.photodownload import PhotoDownloader
 from ef.fetch import Fetcher
 from ef.upload import Uploader
@@ -32,7 +32,6 @@ class ImageListItem(QtGui.QStandardItem):
         self.loading = False
 
         self.size_hint = QtCore.QSize(80, 160)
-        self.thumbnail_size = QtCore.QSize(60, 80)
 
         self.setFlags(QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsSelectable)
 
@@ -261,15 +260,16 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         self.forwards.setDisabled(True)
 
         self.photodownloader = PhotoDownloader()
-        self.list_photo_cache = PhotoCache(self.photodownloader, 100, scale_size=QtCore.QSize(60, 80))
-        self.main_photo_cache = PhotoCache(self.photodownloader, 10)
+        self.list_photo_cache = ThumbnailCache(self.photodownloader, 100)
+        self.main_photo_cache = PhotoImageCache(self.photodownloader, 10)
         self.unsure = FindUnsure()
         self.fetcher = Fetcher()
         self.uploader = Uploader()
         self.current_person = None
         self.current_photo = None
-        self.current_pixmap = None
+        self.current_image = None
         self.loading_now = False
+        self.photo_load_failed = False
 
         self.history_back = deque()
         self.history_forwards = deque()
@@ -416,7 +416,7 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
     def clear_image(self):
         self.current_person = None
         self.current_photo = None
-        self.current_pixmap = None
+        self.current_image = None
         self.crop_frame.hide()
         self.main_pixmap.hide()
         self.preview_image.setPixmap(QtGui.QPixmap())
@@ -466,6 +466,7 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         if current is None:
             return
 
+        self.photo_load_failed = False
         self.load_person(current.data(QtCore.Qt.UserRole))
 
     def handle_model_item_changed(self, item):
@@ -476,6 +477,9 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
 
     """Load this person's photo into the editor"""
     def load_person(self, id, refresh=False):
+        if self.photo_load_failed:
+            return
+
         p = self.image_list_items[id].person
         photo = self.image_list_items[id].photo
 
@@ -547,8 +551,9 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
             text = u'Failed to load %s: %s' % (self.current_person, error)
             self.clear_image()
             self.person_name.setText(text)
+            self.photo_load_failed = True
 
-    def handle_photo_ready(self, id, pixmap):
+    def handle_photo_ready(self, id, image):        
         if self.current_photo is None or self.current_photo.id != id:
             return
 
@@ -559,7 +564,9 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
             angle = 0
         self.rotate.setValue(angle)
 
-        self.current_pixmap = pixmap
+        image.set_rotation(self.current_photo.rotate)
+
+        self.current_image = image
         self.setup_photo()
 
     def setup_photo(self):
@@ -567,13 +574,13 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         # signals like editing would
         self.loading_now = True
 
-        pixmap = self.current_pixmap.transformed(QtGui.QTransform().rotate(self.rotate.value()))
+        image = self.current_image.make_image()
+        pixmap = QtGui.QPixmap.fromImage(image.copy())
         self.main_pixmap.setPixmap(pixmap)
 
         width = pixmap.width()
         height = pixmap.height()
         self.main_pixmap.setTransformOriginPoint(width/2, height/2)
-        #self.main_pixmap.setOffset(-width/2, -height/2)
         self.edit_scene.setSceneRect(0, 0, width, height)
         self.crop_frame.setup_new_image(width, height, self.current_photo)
         self.main_pixmap.show()
@@ -611,7 +618,7 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         self._handle_opinion('unsure')
 
     def handle_rotate(self, angle):
-        if self.current_pixmap is not None and not self.loading_now:
+        if self.current_image is not None and not self.loading_now:
             self.setup_photo()
             self.current_photo.update_rotation(angle)
 
@@ -636,7 +643,8 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         pixmap = self.main_pixmap.pixmap()
         pixmap = pixmap.copy(self.crop_frame.cropping_rect())
 
-        orig_size = self.current_pixmap.width() * self.current_pixmap.height()
+        orig_width, orig_height = self.current_image.orig_size()
+        orig_size = orig_width * orig_height
         new_size = pixmap.width() * pixmap.height()
 
         pixmap = pixmap.scaled(102, 136, QtCore.Qt.KeepAspectRatio)

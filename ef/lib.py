@@ -8,8 +8,6 @@ class LimitedSizeDict(OrderedDict):
       self._check_size_limit()
 
   def __setitem__(self, key, value):
-      if key in self:
-          del self[key]
       OrderedDict.__setitem__(self, key, value)
       self._check_size_limit()
 
@@ -17,6 +15,21 @@ class LimitedSizeDict(OrderedDict):
       if self.size_limit is not None:
           while len(self) > self.size_limit:
               self.popitem(last=False)
+
+class LRUCache(object):
+    def __init__(self, *args, **kwargs):
+        self.cache = LimitedSizeDict(*args, **kwargs)
+
+    def __getitem__(self, key):
+        value = None
+        if key in self.cache:
+            value = self.cache.pop(key)
+            self.cache[key] = value
+        return value
+
+    def __setitem__(self, key, value):
+        self.cache.pop(key, None)
+        self.cache[key] = value
 
 class SignalGroup(QtCore.QObject):
     '''A SignalGroup will emit its fire signal once, after all the

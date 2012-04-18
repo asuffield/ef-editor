@@ -388,6 +388,8 @@ class DBBase(QtCore.QObject):
             setattr(self, k, v)
             key[k] = v
 
+        self.ready = False
+
         self.__proxy = DBBaseProxy()
         # proxies don't have any methods so this doesn't really matter...
         self.__proxy.moveToThread(dbmanager.worker)
@@ -402,6 +404,7 @@ class DBBase(QtCore.QObject):
                 setattr(self, k, v)
             except TypeError:
                 setattr(self, k, None)
+        self.ready = True
         self.updated.emit(origin)
 
     @classmethod
