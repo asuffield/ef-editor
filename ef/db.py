@@ -424,6 +424,8 @@ class DBBase(QtCore.QObject):
             batch.add_op()
             return id(batch)
 
+    # XXX: Rework this to not require the key in values (fill it in),
+    # and to accept values as keyword arguments
     def update(self, values, origin='', batch=None):
         self._check_values(values)
         dbmanager.update(self.__tablename__, values, origin, self.batch_op(batch))
@@ -522,6 +524,9 @@ class Photo(DBBase):
                   'crop_centre_x' : conv_float,
                   'crop_centre_y' : conv_float,
                   'crop_scale' : conv_float,
+                  'brightness' : conv_float,
+                  'contrast' : conv_float,
+                  'gamma' : conv_float,
                   'rotate' : conv_float,
                   'opinion' : conv_str,
                   }
@@ -550,6 +555,21 @@ class Photo(DBBase):
     def update_rotation(self, angle, origin=''):
         self.update({'id': self.id,
                      'rotate': angle,
+                     }, origin)
+
+    def update_brightness(self, brightness, origin=''):
+        self.update({'id': self.id,
+                     'brightness': brightness,
+                     }, origin)
+
+    def update_contrast(self, contrast, origin=''):
+        self.update({'id': self.id,
+                     'contrast': contrast,
+                     }, origin)
+
+    def update_gamma(self, gamma, origin=''):
+        self.update({'id': self.id,
+                     'gamma': gamma,
                      }, origin)
 
 class Person(DBBase):
@@ -764,7 +784,8 @@ def setup_session(datadir):
                        last_checked_at DATETIME,
                        PRIMARY KEY (id)
                        )''')
-    if db.record('photo').isEmpty():
+    photo_record = db.record('photo')
+    if photo_record.isEmpty():
         query.exec_('''CREATE TABLE photo (
                        id INTEGER NOT NULL,
                        url VARCHAR,
@@ -773,6 +794,9 @@ def setup_session(datadir):
                        crop_centre_x FLOAT default 0.5,
                        crop_centre_y FLOAT default 0.5,
                        crop_scale FLOAT default 1.0,
+                       brightness float default 0.0,
+                       contrast float default 0.0,
+                       gamma float default 1.0,
                        rotate FLOAT default 0,
                        opinion VARCHAR(6) default 'unsure',
                        PRIMARY KEY (id),
@@ -780,6 +804,14 @@ def setup_session(datadir):
                        FOREIGN KEY(person_id) REFERENCES person (id),
                        CONSTRAINT photo_opinion CHECK (opinion IN ('ok', 'bad', 'unsure'))
                        )''')
+    else:
+        if not photo_record.contains('brightness'):
+            query.exec_('''alter table photo add column brightness float default 0.0''')
+        if not photo_record.contains('contrast'):
+            query.exec_('''alter table photo add column contrast float default 0.0''')
+        if not photo_record.contains('gamma'):
+            query.exec_('''alter table photo add column gamma float default 1.0''')
+            
     if db.record('event').isEmpty():
         query.exec_('''CREATE TABLE event (
 	               id INTEGER NOT NULL,

@@ -585,11 +585,19 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         self.next_unchecked.setDisabled(False)
 
         angle = self.current_photo.rotate
-        if angle is None:
-            angle = 0
-        self.rotate.setValue(angle)
+        brightness = self.current_photo.brightness
+        contrast = self.current_photo.contrast
+        gamma = self.current_photo.gamma
 
-        image.set_rotation(self.current_photo.rotate)
+        self.rotate.setValue(angle)
+        self.brightness_slider.setValue(brightness*127)
+        self.contrast_slider.setValue(contrast*127)
+        self.gamma_slider.setValue(gamma*10)
+
+        image.set_rotation(angle)
+        image.set_brightness(brightness)
+        image.set_contrast(contrast)
+        image.set_gamma(gamma)
 
         self.current_image = image
         self.image_draw_needed = True
@@ -658,16 +666,19 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         if self.current_image is not None and not self.loading_now:
             self.image_draw_needed = True
             self.current_image.set_brightness(brightness / 127)
+            self.current_photo.update_brightness(brightness / 127)
 
     def handle_contrast(self, contrast):
         if self.current_image is not None and not self.loading_now:
             self.image_draw_needed = True
             self.current_image.set_contrast(contrast / 127)
+            self.current_photo.update_contrast(contrast / 127)
 
     def handle_gamma(self, gamma):
         if self.current_image is not None and not self.loading_now:
             self.image_draw_needed = True
             self.current_image.set_gamma(gamma / 10)
+            self.current_photo.update_gamma(gamma / 10)
 
     def handle_next_unsure(self):
         self.next_unchecked.setDisabled(True)
