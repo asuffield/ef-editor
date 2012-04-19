@@ -103,7 +103,7 @@
             <bool>true</bool>
            </property>
            <property name="text">
-            <string>15</string>
+            <string>5</string>
            </property>
            <property name="alignment">
             <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>

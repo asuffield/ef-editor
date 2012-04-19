@@ -50,6 +50,15 @@ Better browsing
  - ok, we just want a full boolean expression query, don't we?
  - export reports of queries to spreadsheet
 
+Filters:
+
+ name: contains
+ opinion: is/is not
+ police status: is/is not
+ attendee category: is/is not
+ registration: is/is not per event
+ bad shape or pixel count
+
 Open image in real editor
 
 Import image files

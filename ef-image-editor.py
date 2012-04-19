@@ -16,6 +16,7 @@ from ef.fetch import Fetcher
 from ef.upload import Uploader
 from ef.threads import thread_registry
 from ef.netlib import start_network_manager
+from ef.filtercontrol import FilterList
 from collections import deque
 from datetime import datetime
 
@@ -290,6 +291,9 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
 
         self.main_pixmap.setZValue(1)
         self.crop_frame.setZValue(2)
+
+        self.filter_list = FilterList(self.filters_container, self.filter_add)
+        self.filters_reset.clicked.connect(self.filter_list.reset)
 
         self.person_model = QtGui.QStandardItemModel(self)
         self.person_model_proxy = QtGui.QSortFilterProxyModel(self)
