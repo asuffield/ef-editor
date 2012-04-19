@@ -1,6 +1,6 @@
 from __future__ import division
 from PyQt4 import QtCore, QtGui
-import Image
+from PIL import Image
 from ImageQt import ImageQt
 import math
 
@@ -84,7 +84,7 @@ class PhotoImage(QtCore.QObject):
 
             x = width * self.crop_centre[0] - crop_width/2
             y = height * self.crop_centre[1] - crop_height/2
-            image = image.crop((int(x), int(y), int(crop_width), int(crop_height)))
+            image = image.crop((int(x), int(y), int(x + crop_width), int(y + crop_height)))
 
         # We don't want the alpha channel modified by the lut
         image_mask = image.split()[3]
@@ -99,4 +99,7 @@ class PhotoImage(QtCore.QObject):
         bg = Image.new('RGB', image.size, (255, 255, 255))
         bg.paste(image, mask=image_mask)
 
-        return ImageQt(bg)
+        return bg
+
+    def make_qimage(self):
+        return ImageQt(self.make_image())

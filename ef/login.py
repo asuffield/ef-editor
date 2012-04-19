@@ -23,6 +23,16 @@ class LoginTask(Task, NetFuncs):
     def task(self):
         soup = yield self.get('https://www.eventsforce.net/libdems/backend/home/login.csp')
         soup = yield self.submit_form(soup.form, {'txtUsername': self.username, 'txtPassword': self.password})
+
+        # Follow hideous javascript redirect that they snuck into the login sequence
+        m = None
+        for script in soup.find_all('script'):
+            m = re.search(r'var redirectURL="(.*)"', script.text)
+            if m:
+                link = m.group(1)
+                soup = yield self.get(link)
+                break
+
         if soup.find(text=re.compile('Invalid logon')) is not None:
             raise LoginError('Invalid logon')
         if soup.title is None:

@@ -4,7 +4,7 @@ from ef.lib import LRUCache
 from ef.image import PhotoImage
 import os
 import traceback
-import Image
+from PIL import Image
 
 max_editing_width = 1200
 max_editing_height = 1600

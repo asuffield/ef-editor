@@ -1,6 +1,6 @@
 from __future__ import division
 import re
-from PyQt4 import QtCore, QtGui
+from PyQt4 import QtCore
 from ef.lib import SignalGroup
 from ef.db import Person, Photo, Registration, Batch, FetchedPhoto, FindPhotos
 import traceback
@@ -8,6 +8,9 @@ from ef.nettask import NetFuncs
 from ef.task import Task
 from ef.login import LoginTask, LoginError
 from ef.threads import thread_registry
+from ef.image import PhotoImage
+from PIL import Image
+from StringIO import StringIO
 
 def catcherror(func):
     def wrapped(self, *args, **kwargs):
@@ -59,24 +62,29 @@ class UploadTask(Task, NetFuncs):
 
         # Read in the image
 
-        reader = QtGui.QImageReader(self.photo.full_path())
-        image = reader.read()
-
-        if image.isNull():
-            if reader.error() == QtGui.QImageReader.FileNotFoundError:
+        try:
+            image = Image.open(str(self.photo.full_path())).convert('RGBA')
+        except IOError, e:
+            if e.errno == errno.ENOENT:
                 # Just skip images that haven't been downloaded, we
                 # couldn't possibly want to upload something we
                 # haven't looked at
                 self.completed.emit(False)
                 return
-            self.error.emit(reader.errorString())
-            return
+            raise
 
-        # Now we need to scale the image, etc...
+        photoimage = PhotoImage(image)
+        photoimage.set_rotation(self.photo.rotate)
+        photoimage.set_brightness(self.photo.brightness)
+        photoimage.set_contrast(self.photo.contrast)
+        photoimage.set_gamma(self.photo.gamma)
+        photoimage.set_crop_scale(self.photo.crop_scale)
+        photoimage.set_crop_centre(self.photo.crop_centre_x, self.photo.crop_centre_y)
+        photoimage.set_crop(True)
 
-        orig_size = image.width() * image.height()
-        image = self.transform_image(image)
-        new_size = image.width() * image.height()
+        orig_size = image.size[0] * image.size[1]
+        image = photoimage.make_image()
+        new_size = image.size[0] * image.size[1]
 
         size_change = new_size / orig_size
         if self.photo.rotate == 0 and (100 * abs(1 - size_change)) < self.minimum_change:
@@ -87,25 +95,6 @@ class UploadTask(Task, NetFuncs):
 
         # Start the process of uploading the edited image to eventsforce
         self.start_task(image)
-
-    def transform_image(self, image):
-        image = image.transformed(QtGui.QTransform().rotate(self.photo.rotate))
-        width = image.width()
-        height = image.height()
-        if (width/height) > (6/8):
-            crop_height = float(height)
-            crop_width = crop_height * 6/8
-        else:
-            crop_width = float(width)
-            crop_height = crop_width * 8/6
-        crop_width = crop_width * self.photo.crop_scale
-        crop_height = crop_height * self.photo.crop_scale
-
-        crop_centre_x = width * self.photo.crop_centre_x
-        crop_centre_y = height * self.photo.crop_centre_y
-
-        image = image.copy(crop_centre_x - crop_width/2, crop_centre_y - crop_height/2, crop_width, crop_height)
-        return image
 
     def extract_link_from_silly_button(self, button):
         m = re.match(r'document.location=\'(.*)\';', button['onclick'])
@@ -118,12 +107,12 @@ class UploadTask(Task, NetFuncs):
         filename = '%d_%s.jpg' % (self.person.id, self.person.fullname)
         filename = re.sub(r'[ #?/:]', '_', filename)
 
+        data = StringIO()
+        image.save(data, 'jpeg')
+
         buffer = QtCore.QBuffer(self)
-        buffer.open(QtCore.QIODevice.ReadWrite)
-        writer = QtGui.QImageWriter(buffer, 'jpeg')
-        writer.setQuality(95)
-        writer.write(image)
-        buffer.seek(0)
+        buffer.setData(data.getvalue())
+        buffer.open(QtCore.QIODevice.ReadOnly)
 
         # Make sure buffer sticks around while the network operation runs
         self.buffer = buffer
@@ -182,6 +171,14 @@ class UploadTask(Task, NetFuncs):
             if m:
                 break
         link = m.group(1)
+
+        if re.search(r'File could not be saved', link):
+            # retry loop is being constructed here - can't reproduce reliably so one piece at a time
+            soup = yield self.get(link)
+            print link
+            soup = yield self.submit_form(soup.form)
+            print soup
+        
         if not re.search(r'uploadSuccess=1', link):
             self.error.emit("Upload failed, error link: %s" % link)
             return

@@ -611,7 +611,7 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         # signals like editing would
         self.loading_now = True
 
-        image = self.current_image.make_image()
+        image = self.current_image.make_qimage()
         pixmap = QtGui.QPixmap.fromImage(image.copy())
         self.main_pixmap.setPixmap(pixmap)
 
