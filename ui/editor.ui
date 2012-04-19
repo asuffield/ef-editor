@@ -955,6 +955,7 @@ unsure</string>
     </property>
     <addaction name="action_fetch"/>
     <addaction name="action_upload"/>
+    <addaction name="action_reloadphoto"/>
     <addaction name="separator"/>
     <addaction name="action_history"/>
     <addaction name="action_editimage"/>
@@ -997,6 +998,11 @@ unsure</string>
   <action name="action_openeventsforce">
    <property name="text">
     <string>Open in eventsforce</string>
+   </property>
+  </action>
+  <action name="action_reloadphoto">
+   <property name="text">
+    <string>Reload this photo</string>
    </property>
   </action>
  </widget>

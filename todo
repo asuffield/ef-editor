@@ -35,9 +35,7 @@ Figure out the number of pixels we need in photos for them to be acceptable
 
   object when space_used < 0.95
 
-Update local photo after upload
-
-Photo brightness/contrast controls
+Choice of which report to run
 
 Better browsing
  - we never really want to see all the people. too clumsy.
@@ -65,8 +63,6 @@ use pyinstaller instead of py2exe
 Think of a way to pick up new registrations quickly. Maybe a report that takes a date?
 
 Multiple simultaneous uploads, for speed? Downloads? Priority of those?
-
-Redownload of photo if it looks corrupted
 
 Image history
 

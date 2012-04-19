@@ -709,10 +709,11 @@ class FindPhotos(QtCore.QObject, Finishable):
 class FetchedPhotoWorker(QtCore.QObject):
     finished = QtCore.pyqtSignal()
 
-    def __init__(self, person_id, url, batch):
+    def __init__(self, person_id, url, batch, opinion):
         QtCore.QObject.__init__(self)
         self.person_id = person_id
         self.url = url
+        self.opinion = opinion
         self.first_batch = Batch(batch)
         self.second_batch = Batch(batch)
 
@@ -735,10 +736,19 @@ class FetchedPhotoWorker(QtCore.QObject):
         photo_id = self.find_photo()
         query = QtSql.QSqlQuery()
         query.setForwardOnly(True)
+
+        new_values = {'date_fetched': time.time()}
+        if self.opinion is not None:
+            new_values['opinion'] = self.opinion
+        
         if photo_id is not None:
-            dbmanager.update('photo', {'id': id, 'date_fetched': time.time()}, 'FetchedPhoto', DBBase.batch_op(self.first_batch))
+            values = {'id': id}
+            values.update(new_values)
+            dbmanager.update('photo', values, 'FetchedPhoto', DBBase.batch_op(self.first_batch))
         else:
-            dbmanager.upsert('photo', {'url': self.url, 'person_id': self.person_id, 'date_fetched': time.time()}, 'FetchedPhoto', DBBase.batch_op(self.first_batch))
+            values = {'url': self.url, 'person_id': self.person_id}
+            values.update(new_values)
+            dbmanager.upsert('photo', values, 'FetchedPhoto', DBBase.batch_op(self.first_batch))
 
         self.first_batch.finished.connect(self.update_person)
         self.first_batch.finish()
@@ -751,10 +761,10 @@ class FetchedPhotoWorker(QtCore.QObject):
 class FetchedPhoto(QtCore.QObject):
     sig_run = QtCore.pyqtSignal()
 
-    def __init__(self, person_id, url, batch):
+    def __init__(self, person_id, url, batch, opinion=None):
         QtCore.QObject.__init__(self)
 
-        self.worker = FetchedPhotoWorker(person_id, url, batch)
+        self.worker = FetchedPhotoWorker(person_id, url, batch, opinion)
         self.worker.moveToThread(dbmanager.worker)
         self.sig_run.connect(self.worker.run)
 

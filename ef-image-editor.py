@@ -348,6 +348,7 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         self.gamma_slider.valueChanged.connect(self.handle_gamma)
 
         self.action_openeventsforce.triggered.connect(self.handle_openeventsforce)
+        self.action_reloadphoto.triggered.connect(self.handle_reloadphoto)
 
         self.status_expiry_timer = QtCore.QTimer(self)
         self.status_expiry_timer.setInterval(5000)
@@ -518,7 +519,7 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
             while len(self.history_back) > 10:
                 self.history_back.popleft()
 
-        if photo is not None:
+        if photo is not None and photo.full_path() is not None:
             self.clear_image()
             self.current_person = p
             self.current_photo = photo
@@ -530,6 +531,10 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
                                              fail_cb=self.handle_photo_fail,
                                              urgent=True, refresh=refresh,
                                              )
+
+    def handle_reloadphoto(self):
+        if self.current_person is not None:
+            self.load_person(self.current_person.id, refresh=True)        
 
     """Select this id in person_list"""
     def select_person(self, id):

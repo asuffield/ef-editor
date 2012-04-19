@@ -191,7 +191,8 @@ class UploadTask(Task, NetFuncs):
         soup = yield self.get(link)
 
         link = soup.find('a', href=re.compile(r'^/LIBDEMS/media/delegate_files/'))
-        print 'New photo is at', link['href']
+
+        new_photo_url = str(self.current.resolve_url(link['href']).toString())
 
         while not re.search(r'Booking details', soup.find_all('h1')[1].text.strip(), re.I):
             soup = yield self.submit_form(soup.form)
@@ -206,6 +207,13 @@ class UploadTask(Task, NetFuncs):
 
         if not re.search(r'Booking confirmation', soup.find_all('h1')[1].text, re.I):
             self.error.emit('Final page after upload did not look right, did something bad happen?')
+
+        new_opinion = None
+        if self.photo.opinion == 'ok':
+            new_opinion = 'ok'
+
+        self.fetchedphoto = FetchedPhoto(self.id, new_photo_url, self.batch, opinion=new_opinion)
+        self.fetchedphoto.run()
 
 class UploadWorker(QtCore.QObject):
     completed = QtCore.pyqtSignal()
