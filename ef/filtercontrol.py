@@ -11,7 +11,7 @@ class FilterProxyModel(QtGui.QSortFilterProxyModel):
         self.name = ''
         self.id = None
         self.only_bad_sizes = False
-        self.opinion = 'any'
+        self.opinion = 'unsure'
         self.police_status = ''
         self.event_id = None
         self.category = ''

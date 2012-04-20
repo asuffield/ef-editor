@@ -326,7 +326,7 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         self.person_model_proxy.setDynamicSortFilter(True)
 
         self.filter_opinion.currentIndexChanged[str].connect(self.person_model_proxy.set_opinion)
-        self.filter_by_size.clicked.connect(self.person_model_proxy.set_only_bad_sizes)
+        self.filter_by_size.stateChanged.connect(self.person_model_proxy.set_only_bad_sizes)
         
         self.person_model_proxy.setSortCaseSensitivity(False)
         self.person_model_proxy.setSortRole(QtCore.Qt.UserRole+1)

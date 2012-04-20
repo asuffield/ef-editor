@@ -1,6 +1,7 @@
 High priority bugs
 ------------------
 Photos with apostrophe in the url
+ - sent to emma for EF bug report
 
 Error logging
 
@@ -12,52 +13,13 @@ Detect errors when login details wrong
 
 High priority features
 ----------------------
-Figure out the number of pixels we need in photos for them to be acceptable
-  - object at <5000 pixels
-  - or...
-  
-  current_ratio = w/h
-  correct_ratio = 6/8
-  if current_ratio > correct_ratio:
-    w2 = w * 6/w = 6
-    h2 = h * 6/w
-    area = h2 * w2 = 6 * 6h/w = 6^2 * h/w
-    full_area = 6*8
-    space_used = 6*6*h/w / (6*8) = 6h/8w
-  
-  if current_ratio < correct_ratio:
-    h2 = h * 8/h = 8
-    w2 = w * 8/h
-    area = 8 * 8 * w/h
-    space_used = 8 * 8 * w/h / (6*8) = 8w/6h
-
-  hence, space_used is 6h/8w, and 1/that if >1
-
-  object when space_used < 0.95
-
 Choice of which report to run
 
 Better browsing
- - we never really want to see all the people. too clumsy.
-   always going to be by search or filter in practice
  - almost always filter out 'ok' and 'bad' opinions
- - screen space limited - modal? Filter first, then hide display while
-   editing?
- - filter by size/pixel count badness
  - filter by police status
  - attendee category
- - nontrivial predicates of events: find spring attendees who didn't go to autumn
- - ok, we just want a full boolean expression query, don't we?
  - export reports of queries to spreadsheet
-
-Filters:
-
- name: contains
- opinion: is/is not
- police status: is/is not
- attendee category: is/is not
- registration: is/is not per event
- bad shape or pixel count
 
 Open image in real editor
 

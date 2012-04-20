@@ -229,6 +229,9 @@
               </item>
               <item row="5" column="1">
                <widget class="QComboBox" name="filter_opinion">
+                <property name="currentIndex">
+                 <number>3</number>
+                </property>
                 <item>
                  <property name="text">
                   <string>any</string>
