@@ -10,7 +10,7 @@ from PyQt4 import QtCore, QtGui
 from ef.ui.editor import Ui_ImageEdit
 from ef.ui.fetch_wizard import Ui_LoadPeopleWizard
 from ef.ui.upload_wizard import Ui_UploadPeopleWizard
-from ef.db import Person, Photo, setup_session, FindRegistrations, dbmanager
+from ef.db import Person, Photo, setup_session, FindRegistrations, Event, dbmanager
 from ef.photocache import ThumbnailCache, PhotoImageCache
 from ef.photodownload import PhotoDownloader
 from ef.fetch import Fetcher
@@ -35,6 +35,7 @@ class ImageListItem(QtGui.QStandardItem):
         self.registrations = []
         self.findregistrations = FindRegistrations(person_id)
         self.findregistrations.finished.connect(self.registrations_updated)
+        self.findregistrations.run()
 
         self.size_hint = QtCore.QSize(80, 160)
 
@@ -74,12 +75,18 @@ class ImageListItem(QtGui.QStandardItem):
             return self.registrations
 
         if role == QtCore.Qt.UserRole+5:
+            if self.photo is None:
+                return None
             return (self.photo.width, self.photo.height)
 
         if role == QtCore.Qt.UserRole+6:
+            if self.photo is None:
+                return None
             return self.photo.full_path()
 
         if role == QtCore.Qt.UserRole+7:
+            if self.photo is None:
+                return None
             return self.photo.id
 
         return None
@@ -319,15 +326,15 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         self.main_pixmap.setZValue(1)
         self.crop_frame.setZValue(2)
 
+        self.events = {}
+        self.event_load_handlers = {}
+
         self.person_model = QtGui.QStandardItemModel(self)
+        self.person_model.setColumnCount(1)
 
         self.person_model_proxy = FilterProxyModel()
-        self.person_model_proxy.setSourceModel(self.person_model)
         self.person_model_proxy.setDynamicSortFilter(True)
-
-        self.filter_opinion.currentIndexChanged[str].connect(self.person_model_proxy.set_opinion)
-        self.filter_by_size.stateChanged.connect(self.person_model_proxy.set_only_bad_sizes)
-        
+        self.person_model_proxy.setSourceModel(self.person_model)
         self.person_model_proxy.setSortCaseSensitivity(False)
         self.person_model_proxy.setSortRole(QtCore.Qt.UserRole+1)
         self.person_model_proxy.sort(0)
@@ -335,8 +342,15 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         self.person_list.setModel(self.person_model_proxy)
         self.person_model.itemChanged.connect(self.handle_model_item_changed)
 
+        self.filter_opinion.currentIndexChanged[str].connect(self.person_model_proxy.set_opinion)
+        self.filter_event.currentIndexChanged[int].connect(self.handle_filter_event_changed)
+        self.filter_category.currentIndexChanged[str].connect(self.person_model_proxy.set_category)
+        self.filter_police.currentIndexChanged[str].connect(self.person_model_proxy.set_police_status)
+        self.filter_by_size.stateChanged.connect(self.person_model_proxy.set_only_bad_sizes)
+
         dbmanager.created.connect(self.handle_db_created)
         Person.signal_existing_created()
+        Event.signal_existing_created()
 
         self.person_list.selectionModel().currentChanged.connect(self.handle_select)
         self.output_updated.connect(self.handle_crop)
@@ -519,8 +533,11 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         self.load_person(current.data(QtCore.Qt.UserRole))
 
     def handle_model_item_changed(self, item):
+        changed_index = self.person_model_proxy.mapFromSource(item.index())
+        current_index = self.person_list.selectionModel().currentIndex()
+
         # If this item is the currently selected item...
-        if self.person_model_proxy.mapFromSource(item.index()) == self.person_list.selectionModel().currentIndex():
+        if changed_index.isValid() and current_index.isValid() and changed_index == current_index:
             # ...fish out the relevant data...
             person_id = item.data(QtCore.Qt.UserRole)
 
@@ -841,12 +858,22 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
             id, ok = key['id'].toInt()
             item = self.image_list_items[id] = ImageListItem(self.photodownloader, self.list_photo_cache, id)
             self.person_model.appendRow(item)
+        elif table == 'event':
+            id, ok = key['id'].toInt()
+            event = self.events[id] = Event(id)
+            handler = self.event_load_handlers[id] = lambda: self.filter_event.addItem(event.name, id)
+            self.events[id].updated.connect(handler)
+
+    def handle_filter_event_changed(self, index):
+        id = self.filter_event.itemData(index).toPyObject()
+        self.person_model_proxy.set_event_id(id)
 
     def handle_openeventsforce(self):
         if self.current_person is not None:
             QtGui.QDesktopServices.openUrl(QtCore.QUrl('https://www.eventsforce.net/libdems/backend/home/codEditMain.csp?codReadOnly=1&personID=%d&curPage=1' % self.current_person.id))
 
     def handle_editimage(self):
+        self.person_model_proxy.invalidate()
         pass
 
 def setup():

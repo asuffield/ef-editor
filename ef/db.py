@@ -1,6 +1,7 @@
 import os
 import weakref
 import time
+import traceback
 from PyQt4 import QtCore, QtSql
 from ef.threads import WorkerThread
 from collections import deque, OrderedDict
@@ -395,7 +396,7 @@ class DBBase(QtCore.QObject, Finishable):
             values[k] = None
 
         if key_dict is not None:
-            key_values = [key_dict[k] for k in self.key_fields]
+            key_values = [key_dict[k] for k in key_fields]
 
         for k, v in zip(key_fields, key_values):
             values[k] = v
@@ -546,8 +547,8 @@ def conv_float(v):
 class Event(DBBase):
     __tablename__ = 'event'
     __key__ = ['id']
-    __fields__ = {'id': int,
-                  'name': str,
+    __fields__ = {'id': conv_int,
+                  'name': conv_unicode,
                   }
 
 class Photo(DBBase):
@@ -649,7 +650,6 @@ class QueryWorker(QtCore.QObject):
 
         self.query_str = query_str
         self.binds = binds
-        self.exception = None
         self.rows = None
 
     @QtCore.pyqtSlot()
@@ -658,7 +658,7 @@ class QueryWorker(QtCore.QObject):
             query = QtSql.QSqlQuery()
             if not query.prepare(self.query_str):
                 raise DBException("Prepare failed", query)
-            for k, v in self.binds.itervalues():
+            for k, v in self.binds.iteritems():
                 query.bindValue(':%s' % k, v)
             query.setForwardOnly(True)
             if not query.exec_():
@@ -677,6 +677,7 @@ class QueryWorker(QtCore.QObject):
             self.rows = rows
             self.finished.emit()
         except Exception, e:
+            traceback.print_exc()
             self.exception.emit(e)
 
 class Query(QtCore.QObject, Finishable):
@@ -755,7 +756,7 @@ class FindRegistrations(Query):
     def result(self):
         def unpack_row(row):
             event_id, ok = row[0].toInt()
-            return Registration({'person_id': self.person_id, 'event_id': event_id})
+            return Registration(key={'person_id': self.person_id, 'event_id': event_id})
             
         return map(unpack_row, self.rows())
 

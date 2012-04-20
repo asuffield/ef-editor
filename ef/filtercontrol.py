@@ -4,6 +4,7 @@ from PyQt4 import QtCore, QtGui
 from PIL import Image
 from ef.db import Photo
 import os
+import traceback
 
 class FilterProxyModel(QtGui.QSortFilterProxyModel):
     def __init__(self):
@@ -12,9 +13,11 @@ class FilterProxyModel(QtGui.QSortFilterProxyModel):
         self.id = None
         self.only_bad_sizes = False
         self.opinion = 'unsure'
-        self.police_status = ''
+        self.police_status = 'any'
         self.event_id = None
-        self.category = ''
+        self.category = 'any'
+
+        self.startup_hack = True
 
     def set_opinion(self, opinion):
         self.opinion = opinion
@@ -65,14 +68,43 @@ class FilterProxyModel(QtGui.QSortFilterProxyModel):
         return True
 
     def filterAcceptsRow(self, source_row, source_parent):
+        try:
+            index = self.sourceModel().index(source_row, 0, source_parent)
+            return self.is_row_ok(index)
+        except:
+            traceback.print_exc()
+
+    def is_row_ok(self, index):
         model = self.sourceModel()
-        index = model.index(source_row, 0, source_parent)
 
         if self.id is not None:
             id, ok = model.data(index, QtCore.Qt.UserRole).toInt()
             return self.id == id
 
-        name = model.data(index, QtCore.Qt.DisplayRole).toString()
+        name = model.data(index, QtCore.Qt.DisplayRole).toPyObject()
+        opinion = model.data(index, QtCore.Qt.UserRole+2).toPyObject()
+
+        # Hack, until I have the patience to figure out what's going
+        # on here. The filter has an invalid mapToSource mapping for
+        # quite a long time before it starts working, and the sort
+        # order will be wrong before that point. Obviously a Qt
+        # bug. This bit of logic detects when the mapping starts
+        # working, and invalidates the whole filter so things will be
+        # recalcualted properly.        
+        if self.startup_hack:
+            sidx = self.index(0, 0, QtCore.QModelIndex())
+            if self.mapToSource(sidx).column() != -1:
+                self.startup_hack = False
+                self.invalidate()
+
+        if name is None or opinion is None:
+            # This should really be False - they're still loading, and should not be displayed yet. However, for some reason
+            #print "Discarding", name, opinion
+            return False
+
+        if opinion is None:
+            return True
+
         if self.name:
             if self.name not in name:
                 return False
@@ -82,20 +114,20 @@ class FilterProxyModel(QtGui.QSortFilterProxyModel):
                 return False
 
         if self.opinion != 'any':
-            opinion = model.data(index, QtCore.Qt.UserRole+2).toString()
             if opinion != self.opinion:
                 return False
 
-        if self.police_status:
+        if self.police_status != 'any':
             police_status = model.data(index, QtCore.Qt.UserRole+3).toString()
             if police_status != self.police_status:
                 return False
 
-        if self.category or self.event_id:
+        if self.category != 'any' or self.event_id:
             registrations = model.data(index, QtCore.Qt.UserRole+4).toList()
             matched_reg = False
-            for registration in registrations:
-                if self.category:
+            for variant in registrations:
+                registration = variant.toPyObject()
+                if self.category != 'any':
                     if registration.attendee_type != self.category:
                         continue
                 if self.event_id:
