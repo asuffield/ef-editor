@@ -16,7 +16,7 @@ from ef.fetch import Fetcher
 from ef.upload import Uploader
 from ef.threads import thread_registry
 from ef.netlib import start_network_manager
-from ef.filtercontrol import FilterList
+from ef.filtercontrol import FilterProxyModel
 from collections import deque
 from datetime import datetime
 
@@ -31,6 +31,7 @@ class ImageListItem(QtGui.QStandardItem):
         self.downloader = downloader
         self.photo_load_retries = 0
         self.loading = False
+        self.events = {}
 
         self.size_hint = QtCore.QSize(80, 160)
 
@@ -57,6 +58,17 @@ class ImageListItem(QtGui.QStandardItem):
 
         if role == QtCore.Qt.UserRole+1:
             return u"%s %s" % (self.person.lastname, self.person.firstname)
+
+        if role == QtCore.Qt.UserRole+2:
+            if self.photo is None:
+                return None
+            return self.photo.opinion
+
+        if role == QtCore.Qt.UserRole+3:
+            return self.person.police_status
+
+        if role == QtCore.Qt.UserRole+4:
+            return self.events
 
         return None
 
@@ -292,8 +304,8 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         self.main_pixmap.setZValue(1)
         self.crop_frame.setZValue(2)
 
-        self.filter_list = FilterList(self.filters_container, self.filter_add)
-        self.filters_reset.clicked.connect(self.filter_list.reset)
+        #self.filter_list = FilterList(self.filters_container, self.filter_add)
+        #self.filters_reset.clicked.connect(self.filter_list.reset)
 
         self.person_model = QtGui.QStandardItemModel(self)
         self.person_model_proxy = QtGui.QSortFilterProxyModel(self)

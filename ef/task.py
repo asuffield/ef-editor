@@ -8,6 +8,7 @@ class TaskOp(QtCore.QObject):
     def __init__(self):
         super(TaskOp, self).__init__()
         self.op_id = None
+        self.task_done = False
 
     def set_op_id(self, op_id):
         self.op_id = op_id
@@ -17,7 +18,11 @@ class TaskOp(QtCore.QObject):
 
     @QtCore.pyqtSlot()
     def finish(self):
+        # Suppress duplicate calls
+        if self.task_done:
+            return
         self._finished.emit(self.op_id)
+        self.task_done = True
 
     @QtCore.pyqtSlot(Exception)
     def throw(self, e):
@@ -34,17 +39,22 @@ class TaskOp(QtCore.QObject):
         return None
 
 class Finishable(object):
-    def __init__(self, signal):
+    def __init__(self, signal, error_signal=None):
         self.finish_signal = signal
+        self.error_signal = error_signal
         self.finish_signal.connect(self.handle_finished_signal)
-        self.has_finished = False
+        if error_signal is not None:
+            self.error_signal.connect(self.handle_error_signal)
+        self.is_finished = False
+        self.finished_error = None
 
     def handle_finished_signal(self):
-        self.has_finished = True
-    
-    def is_finished(self):
-        return self.has_finished
+        self.is_finished = True
 
+    def handle_error_signal(self, e):
+        self.is_finished = True
+        self.finished_error = e
+    
 class SignalWaitOp(TaskOp):
     def __init__(self, signal):
         TaskOp.__init__(self)
@@ -56,11 +66,15 @@ class FinishableWaitOp(TaskOp):
     def __init__(self, finishable):
         TaskOp.__init__(self)
         self.finishable = finishable
-        if self.finishable.is_finished():
+        if self.finishable.finished_error is not None:
+            self.throw(self.finishable.finished_error)
+        elif self.finishable.is_finished:
             self.finish()
         else:
             self.finishable.finish_signal.connect(self.finish)
-    
+            if self.finishable.error_signal is not None:
+                self.finishable.error_signal.connect(self.throw)
+
 class Task(QtCore.QObject):
     task_finished = QtCore.pyqtSignal()
     task_aborted = QtCore.pyqtSignal()

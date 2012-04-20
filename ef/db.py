@@ -375,26 +375,58 @@ class DBBaseMeta(type(QtCore.QObject)):
 
         dbmanager.register_class(self, name)
 
-class DBBase(QtCore.QObject):
+class DBBase(QtCore.QObject, Finishable):
     __metaclass__ = DBBaseMeta
     updated = QtCore.pyqtSignal(str)
 
-    def __init__(self, *key_fields):
+    def __init__(self, *key_values, **kwargs):
         QtCore.QObject.__init__(self)
+        Finishable.__init__(self, self.updated)
+
+        key_fields = self.__key__
+        key_dict = kwargs.pop('key', None)
+
+        object.__setattr__(self, '__key__', {})
+        object.__setattr__(self, '__values__', {})
+        values = self.__values__
+        key = self.__key__
+        
         for k in self.__fields__:
-            setattr(self, k, None)
-        key = {}
-        for k, v in zip(self.__key__, key_fields):
-            setattr(self, k, v)
+            values[k] = None
+
+        if key_dict is not None:
+            key_values = [key_dict[k] for k in self.key_fields]
+
+        for k, v in zip(key_fields, key_values):
+            values[k] = v
             key[k] = v
 
-        self.ready = False
-
-        self.__proxy = DBBaseProxy()
+        object.__setattr__(self, '__proxy__', DBBaseProxy())
         # proxies don't have any methods so this doesn't really matter...
-        self.__proxy.moveToThread(dbmanager.worker)
-        self.__proxy.update.connect(self._do_update)
-        dbmanager.bind(self.__tablename__, key, self.__proxy)
+        self.__proxy__.moveToThread(dbmanager.worker)
+        self.__proxy__.update.connect(self._do_update)
+        dbmanager.bind(self.__tablename__, key, self.__proxy__)
+
+    def __getattr__(self, name):
+        return self.__values__[name]
+
+    def __getitem__(self, name):
+        return self.__values__[name]
+
+    def __iter__(self):
+        return self.__values__.iterkeys()
+
+    def iterkeys(self):
+        return self.__values__.iterkeys()
+
+    def itervalues(self):
+        return self.__values__.itervalues()
+
+    def iteritems(self):
+        return self.__values__.iteritems()
+
+    def __contains__(self, name):
+        return name in self.__values__
 
     def _do_update(self, data, origin):
         for k,v in data.iteritems():
@@ -404,7 +436,6 @@ class DBBase(QtCore.QObject):
                 setattr(self, k, v)
             except TypeError:
                 setattr(self, k, None)
-        self.ready = True
         self.updated.emit(origin)
 
     @classmethod
@@ -424,15 +455,20 @@ class DBBase(QtCore.QObject):
             batch.add_op()
             return id(batch)
 
-    # XXX: Rework this to not require the key in values (fill it in),
-    # and to accept values as keyword arguments
-    def update(self, values, origin='', batch=None):
+    # Update does not require the key to be passed (unlike upsert),
+    # because it takes that from the instance
+    def update(self, values={}, origin='', batch=None, **kwargs):
         self._check_values(values)
+        values = dict(values)
+        values.update(kwargs)
+        values.update(self.__key__)
         dbmanager.update(self.__tablename__, values, origin, self.batch_op(batch))
 
     @classmethod
-    def upsert(self, values, origin='', batch=None):
+    def upsert(self, values={}, origin='', batch=None, **kwargs):
         self._check_values(values)
+        values = dict(values)
+        values.update(kwargs)
         dbmanager.upsert(self.__tablename__, values, origin, self.batch_op(batch))
 
     @classmethod
@@ -658,6 +694,65 @@ class FindUnsure(QtCore.QObject):
         else:
             callback(int(id))
 
+class QueryWorker(QtCore.QObject):
+    finished = QtCore.pyqtSignal()
+    exception = QtCore.pyqtSignal(Exception)
+
+    def __init__(self, query_str, binds):
+        QtCore.QObject.__init__(self)
+
+        self.query_str = query_str
+        self.binds = binds
+        self.exception = None
+        self.rows = None
+
+    @QtCore.pyqtSlot()
+    def run(self):
+        try:
+            query = QtSql.QSqlQuery()
+            if not query.prepare(self.query_str):
+                raise DBException("Prepare failed", query)
+            for k, v in self.binds.itervalues():
+                query.bindValue(':%s' % k, v)
+            query.setForwardOnly(True)
+            if not query.exec_():
+                raise DBException("Query failed?", query)
+            rows = []
+            while query.next():
+                i = 0
+                row = []
+                while True:
+                    v = query.value(i)
+                    if not v.isValid():
+                        break
+                    row.append(v)
+                    i = i + 1
+                rows.append(row)
+            self.rows = rows
+            self.finished.emit()
+        except Exception, e:
+            self.exception.emit(e)
+
+class Query(QtCore.QObject, Finishable):
+    sig_run = QtCore.pyqtSignal()
+
+    def __init__(self, query_str, binds={}):
+        QtCore.QObject.__init__(self)
+
+        self.worker = QueryWorker(query_str, binds)
+        self.worker.moveToThread(dbmanager.worker)
+        self.sig_run.connect(self.worker.run)
+        self.finished = self.worker.finished
+        self.exception = self.worker.exception
+
+        Finishable.__init__(self, self.finished, self.exception)
+
+    def run(self):
+        self.sig_run.emit()
+
+    def rows(self):
+        return self.worker.rows
+
 class FindPhotosWorker(QtCore.QObject):
     finished = QtCore.pyqtSignal()
 
@@ -687,24 +782,24 @@ class FindPhotosWorker(QtCore.QObject):
     def result(self):
         return self.ids
 
-class FindPhotos(QtCore.QObject, Finishable):
-    sig_run = QtCore.pyqtSignal()
-
+class FindPhotos(Query):
     def __init__(self, which):
-        QtCore.QObject.__init__(self)
-
-        self.worker = FindPhotosWorker(which)
-        self.worker.moveToThread(dbmanager.worker)
-        self.sig_run.connect(self.worker.run)
-        self.finished = self.worker.finished
-
-        Finishable.__init__(self, self.finished)
-
-    def run(self):
-        self.sig_run.emit()
+        if which == 'missing':
+            query = """select person.id from person left outer join photo on person.current_photo_id = photo.id where person.current_photo_id is null or photo.opinion = 'bad'
+                       order by person.lastname, person.firstname, person.id"""
+        elif which == 'good':
+            query = """select person.id from person join photo on person.current_photo_id = photo.id where photo.opinion = 'ok'
+                       order by person.lastname, person.firstname, person.id"""
+        else:
+            query = """select person.id from person order by person.lastname, person.firstname, person.id"""
+        Query.__init__(self, query)
 
     def result(self):
-        return self.worker.result()
+        def unpack_row(row):
+            id, ok = row[0].toInt()
+            return id
+            
+        return map(unpack_row, self.rows())
 
 class FetchedPhotoWorker(QtCore.QObject):
     finished = QtCore.pyqtSignal()
