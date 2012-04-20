@@ -3,8 +3,8 @@ import sys
 
 person_fields = set(['Person ID', 'Firstname', 'Lastname', 'Full Name', 'Salutation', 'username',
                      'Profile Picture',
-                     'Registration Date', 'Registration Time'])
-event_fields = set(['Bookers Email', 'Bookers Firstname', 'Bookers lastname', 'Booking Ref', 'Type of Attendee'])
+                     'EF_Application Status', 'common first name'])
+event_fields = set(['Bookers Firstname', 'Bookers lastname', 'Booking Ref', 'Type of Attendee'])
 
 class EFParser(HTMLParser):
     current_target = None

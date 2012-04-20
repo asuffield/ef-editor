@@ -16,10 +16,11 @@ class PersonDBParser(EFDelegateParser):
 
     def handle_person(self, person):
         Person.upsert({'id': person['Person ID'],
-                       'firstname': person['Firstname'],
+                       'firstname': person['Firstname'] or person['common first name'],
                        'lastname': person['Lastname'],
                        'title': person['Salutation'],
                        'fullname': person['Full Name'],
+                       'police_status': person['EF_Application Status'],
                        'last_checked_at': time.time(),
                        }, batch=self.batch)
         self.progress.emit('Updated %d people' % len(self.people), 0, 0)
@@ -37,7 +38,6 @@ class PersonDBParser(EFDelegateParser):
                              'booking_ref': data['Booking Ref'],
                              'booker_firstname': data['Bookers Firstname'],
                              'booker_lastname': data['Bookers lastname'],
-                             'booker_email': data['Bookers Email'],
                              }, batch=self.batch)
 
 def catcherror(func):

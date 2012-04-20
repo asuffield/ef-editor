@@ -618,6 +618,7 @@ class Person(DBBase):
                   'fullname': conv_unicode,
                   'current_photo_id': conv_int,
                   'last_checked_at': conv_float,
+                  'police_status': conv_unicode,
                   }
 
     def __repr__(self):
@@ -633,7 +634,6 @@ class Registration(DBBase):
                   'event_id': conv_int,
                   'attendee_type': conv_unicode,
                   'booking_ref': conv_unicode,
-                  'booker_email': conv_unicode,
                   'booker_firstname': conv_unicode,
                   'booker_lastname': conv_unicode,
                   }
@@ -878,17 +878,22 @@ def setup_session(datadir):
         raise DBException("Failed to open db", db)
 
     query = QtSql.QSqlQuery()
-    if db.record('person').isEmpty():
-        query.exec_('''CREATE TABLE person (
+    person_record = db.record('person')
+    if person_record.isEmpty():
+        query.exec_("""CREATE TABLE person (
                        id INTEGER NOT NULL,
                        firstname VARCHAR,
                        lastname VARCHAR,
                        title VARCHAR,
                        fullname VARCHAR,
+                       police_status varchar,
                        current_photo_id INTEGER,
                        last_checked_at DATETIME,
                        PRIMARY KEY (id)
-                       )''')
+                       )""")
+    else:
+        if not person_record.contains('police_status'):
+            query.exec_("""alter table person add column police_status varchar""")
     photo_record = db.record('photo')
     if photo_record.isEmpty():
         query.exec_('''CREATE TABLE photo (
