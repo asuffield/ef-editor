@@ -2,9 +2,12 @@ from PyQt4 import QtCore, QtGui
 from ef.nettask import NetFuncs
 from ef.task import Task
 from ef.threads import thread_registry
+from ef.db import Photo
 from collections import OrderedDict
 import os
 import sys
+from PIL import Image
+from StringIO import StringIO
 
 class PhotoDownload(Task, NetFuncs):
     def __init__(self, id, url, filename):
@@ -17,6 +20,15 @@ class PhotoDownload(Task, NetFuncs):
 
     def task(self):
         self.data = yield self.get_raw(self.url)
+
+        # Collecting the size here has the neat side-effect that we'll
+        # throw an exception if the data isn't a valid image, so we
+        # won't write complete junk (like an HTML error message) to
+        # the cache
+        buf = StringIO(str(self.data))
+        image = Image.open(buf)
+        width, height = image.size
+        Photo.upsert({'id': self.id, 'width': width, 'height': height})
 
     def write_file(self):
         f = open(self.filename, 'wb')
@@ -96,7 +108,7 @@ class PhotoDownloadWorker(QtCore.QObject):
         self.start_task()
 
     def handle_task_exception(self, e, str):
-        print e
+        print e, self.current_task.url
         if self.current_task is None:
             return
         self.error.emit(self.current_task.id, str)

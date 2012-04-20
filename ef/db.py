@@ -555,6 +555,8 @@ class Photo(DBBase):
     __key__ = ['id']
     __fields__ = {'id': conv_int,
                   'url' : conv_unicode,
+                  'width': conv_int,
+                  'height': conv_int,
                   'date_fetched' : conv_float,
                   'person_id' : conv_int,
                   'crop_centre_x' : conv_float,
@@ -637,62 +639,6 @@ class Registration(DBBase):
                   'booker_firstname': conv_unicode,
                   'booker_lastname': conv_unicode,
                   }
-
-class FindUnsureQuerier(QtCore.QObject):
-    query_result = QtCore.pyqtSignal(int)
-
-    def __init__(self):
-        super(QtCore.QObject, self).__init__()
-        self.buffer = deque()
-        self.visited = set()
-
-    def run_sql_query(self):
-        query = QtSql.QSqlQuery("""select person.id from photo join person on photo.id = person.current_photo_id where photo.opinion = 'unsure' order by person.lastname, person.firstname, person.id""")
-        while query.next():
-            id, ok = query.value(0).toInt()
-            if id in self.visited:
-                continue
-            self.buffer.append(id)
-            self.visited.add(id)
-        query.finish()
-
-    @QtCore.pyqtSlot(int)
-    def query_one(self):
-        if len(self.buffer) == 0:
-            self.run_sql_query()
-        if len(self.buffer) == 0:
-            # Since we found nothing this time, we'll notify failure
-            # and reset the visited set, so future queries will redo
-            # from the start
-            self.visited = set()
-            self.query_result.emit(-1)
-            return
-
-        id = self.buffer.popleft()
-        self.query_result.emit(id)
-
-class FindUnsure(QtCore.QObject):
-    query_one = QtCore.pyqtSignal()
-
-    def __init__(self):
-        QtCore.QObject.__init__(self)
-        self.callbacks = deque()
-
-        self.querier = FindUnsureQuerier()
-        self.querier.moveToThread(dbmanager.worker)
-        self.querier.query_result.connect(self._handle_result)
-        self.query_one.connect(self.querier.query_one)
-
-    def next(self, callback):
-        self.callbacks.append(callback)
-        self.query_one.emit()
-
-    def _handle_result(self, id):
-        callback = self.callbacks.popleft()
-        if id < 0:
-            callback(None)
-        else:
-            callback(int(id))
 
 class QueryWorker(QtCore.QObject):
     finished = QtCore.pyqtSignal()
@@ -801,6 +747,18 @@ class FindPhotos(Query):
             
         return map(unpack_row, self.rows())
 
+class FindRegistrations(Query):
+    def __init__(self, person_id):
+        self.person_id = person_id
+        Query.__init__(self, 'select event_id from registration where person_id = :person_id', {'person_id': person_id})
+
+    def result(self):
+        def unpack_row(row):
+            event_id, ok = row[0].toInt()
+            return Registration({'person_id': self.person_id, 'event_id': event_id})
+            
+        return map(unpack_row, self.rows())
+
 class FetchedPhotoWorker(QtCore.QObject):
     finished = QtCore.pyqtSignal()
 
@@ -901,6 +859,8 @@ def setup_session(datadir):
                        url VARCHAR,
                        date_fetched DATETIME,
                        person_id INTEGER,
+                       width integer default 0,
+                       height integer default 0,
                        crop_centre_x FLOAT default 0.5,
                        crop_centre_y FLOAT default 0.5,
                        crop_scale FLOAT default 1.0,
@@ -915,6 +875,10 @@ def setup_session(datadir):
                        CONSTRAINT photo_opinion CHECK (opinion IN ('ok', 'bad', 'unsure'))
                        )''')
     else:
+        if not photo_record.contains('width'):
+            query.exec_('''alter table photo add column width integer default 0''')
+        if not photo_record.contains('height'):
+            query.exec_('''alter table photo add column height integer default 0''')
         if not photo_record.contains('brightness'):
             query.exec_('''alter table photo add column brightness float default 0.0''')
         if not photo_record.contains('contrast'):

@@ -126,7 +126,7 @@ class ManagerWorker(QtCore.QObject):
     def start(self):
         global manager
         manager = QtNetwork.QNetworkAccessManager()
-        #manager.setProxy(QtNetwork.QNetworkProxy(QtNetwork.QNetworkProxy.HttpProxy, '127.0.0.1', 8080))
+        manager.setProxy(QtNetwork.QNetworkProxy(QtNetwork.QNetworkProxy.HttpProxy, '127.0.0.1', 8080))
 
 def start_network_manager():
     # It requires a silly dance to create an object in a suitable QThread...

@@ -5,11 +5,12 @@ from __future__ import division
 import sys
 import os
 import traceback
+import time
 from PyQt4 import QtCore, QtGui
 from ef.ui.editor import Ui_ImageEdit
 from ef.ui.fetch_wizard import Ui_LoadPeopleWizard
 from ef.ui.upload_wizard import Ui_UploadPeopleWizard
-from ef.db import Person, Photo, setup_session, FindUnsure, dbmanager
+from ef.db import Person, Photo, setup_session, FindRegistrations, dbmanager
 from ef.photocache import ThumbnailCache, PhotoImageCache
 from ef.photodownload import PhotoDownloader
 from ef.fetch import Fetcher
@@ -31,7 +32,9 @@ class ImageListItem(QtGui.QStandardItem):
         self.downloader = downloader
         self.photo_load_retries = 0
         self.loading = False
-        self.events = {}
+        self.registrations = []
+        self.findregistrations = FindRegistrations(person_id)
+        self.findregistrations.finished.connect(self.registrations_updated)
 
         self.size_hint = QtCore.QSize(80, 160)
 
@@ -68,7 +71,16 @@ class ImageListItem(QtGui.QStandardItem):
             return self.person.police_status
 
         if role == QtCore.Qt.UserRole+4:
-            return self.events
+            return self.registrations
+
+        if role == QtCore.Qt.UserRole+5:
+            return (self.photo.width, self.photo.height)
+
+        if role == QtCore.Qt.UserRole+6:
+            return self.photo.full_path()
+
+        if role == QtCore.Qt.UserRole+7:
+            return self.photo.id
 
         return None
 
@@ -92,6 +104,10 @@ class ImageListItem(QtGui.QStandardItem):
         self.loading = False
         self.photo_load_retries = 0
         self.downloader.download_photo(self.photo.id, self.photo.url, self.photo.full_path(), background=True)
+        self.emitDataChanged()
+
+    def registrations_updated(self):
+        self.registrations = self.findregistrations.result()
         self.emitDataChanged()
 
     def handle_photo_ready(self, id, image):
@@ -275,7 +291,6 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         self.photodownloader = PhotoDownloader()
         self.list_photo_cache = ThumbnailCache(self.photodownloader, 100)
         self.main_photo_cache = PhotoImageCache(self.photodownloader, 10)
-        self.unsure = FindUnsure()
         self.fetcher = Fetcher()
         self.uploader = Uploader()
         self.current_person = None
@@ -304,14 +319,15 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         self.main_pixmap.setZValue(1)
         self.crop_frame.setZValue(2)
 
-        #self.filter_list = FilterList(self.filters_container, self.filter_add)
-        #self.filters_reset.clicked.connect(self.filter_list.reset)
-
         self.person_model = QtGui.QStandardItemModel(self)
-        self.person_model_proxy = QtGui.QSortFilterProxyModel(self)
+
+        self.person_model_proxy = FilterProxyModel()
         self.person_model_proxy.setSourceModel(self.person_model)
         self.person_model_proxy.setDynamicSortFilter(True)
-        self.person_model_proxy.setFilterCaseSensitivity(False)
+
+        self.filter_opinion.currentIndexChanged[str].connect(self.person_model_proxy.set_opinion)
+        self.filter_by_size.clicked.connect(self.person_model_proxy.set_only_bad_sizes)
+        
         self.person_model_proxy.setSortCaseSensitivity(False)
         self.person_model_proxy.setSortRole(QtCore.Qt.UserRole+1)
         self.person_model_proxy.sort(0)
@@ -328,7 +344,6 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         self.opinion_ok.clicked.connect(self.handle_opinion_ok)
         self.opinion_bad.clicked.connect(self.handle_opinion_bad)
         self.opinion_unsure.clicked.connect(self.handle_opinion_unsure)
-        self.next_unchecked.clicked.connect(self.handle_next_unsure)
         self.back.clicked.connect(self.handle_back)
         self.forwards.clicked.connect(self.handle_forwards)
         self.search.clicked.connect(self.handle_search)
@@ -364,7 +379,10 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         self.gamma_slider.valueChanged.connect(self.handle_gamma)
 
         self.action_openeventsforce.triggered.connect(self.handle_openeventsforce)
+        self.openeventsforce.clicked.connect(self.handle_openeventsforce)
         self.action_reloadphoto.triggered.connect(self.handle_reloadphoto)
+        self.action_editimage.triggered.connect(self.handle_editimage)
+        self.editimage.clicked.connect(self.handle_editimage)
 
         self.status_expiry_timer = QtCore.QTimer(self)
         self.status_expiry_timer.setInterval(5000)
@@ -452,7 +470,6 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         self.preview_image.setPixmap(QtGui.QPixmap())
         self.person_name.setText(u'')
         self.upload_wizard.upload_photos_thisname.setText('')
-        self.next_unchecked.setDisabled(False)
 
     def foreach_item(self, f):
         for item in self.image_list_items.itervalues():
@@ -463,7 +480,9 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
 
         # If the search box is empty, we want to show all items
         if len(query) == 0:
-            self.person_model_proxy.setFilterRegExp('')
+            self.person_model_proxy.id = None
+            self.person_model_proxy.name = ''
+            self.person_model_proxy.invalidateFilter()
             self.person_model_proxy.sort(0)
             return
 
@@ -474,11 +493,11 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
             id = None
 
         if id is not None:
-            self.person_model_proxy.setFilterRole(QtCore.Qt.UserRole)
-            self.person_model_proxy.setFilterRegExp('^%d$' % id)
+            self.person_model_proxy.id = id
         else:
-            self.person_model_proxy.setFilterRole(QtCore.Qt.DisplayRole)
-            self.person_model_proxy.setFilterFixedString(query)
+            self.person_model_proxy.id = None
+            self.person_model_proxy.name = query
+        self.person_model_proxy.invalidateFilter()
         self.person_model_proxy.sort(0)
 
     def item_from_index(self, index):
@@ -603,8 +622,6 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         if self.current_photo is None or self.current_photo.id != id:
             return
 
-        self.next_unchecked.setDisabled(False)
-
         angle = self.current_photo.rotate
         brightness = self.current_photo.brightness
         contrast = self.current_photo.contrast
@@ -643,6 +660,15 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         self.crop_frame.setup_new_image(width, height, self.current_photo)
         self.main_pixmap.show()
         self.person_name.setText(unicode(self.current_person))
+        self.info_person_id.setText('%d' % self.current_person.id)
+        self.info_fullname.setText(self.current_person.fullname)
+        self.info_title.setText(self.current_person.title)
+        self.info_firstname.setText(self.current_person.firstname)
+        self.info_lastname.setText(self.current_person.lastname)
+        self.info_police_status.setText(self.current_person.police_status)
+        self.info_person_fetched_at.setText(time.ctime(self.current_person.last_checked_at))
+        self.info_photo_filename.setText(self.current_photo.url_filename())
+        self.info_photo_fetched_at.setText(time.ctime(self.current_photo.date_fetched))
         self.main_image.fitInView(self.main_pixmap, QtCore.Qt.KeepAspectRatio)
 
         opinion = self.current_photo.opinion
@@ -701,17 +727,6 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
             self.current_image.set_gamma(gamma / 10)
             self.current_photo.update_gamma(gamma / 10)
 
-    def handle_next_unsure(self):
-        self.next_unchecked.setDisabled(True)
-        self.unsure.next(self.handle_unsure_result)
-
-    def handle_unsure_result(self, person_id):
-        if person_id is None:
-            self.clear_image()
-            self.person_name.setText("End of unsure photos")
-        else:
-            self.jump_to_person(person_id)
-
     def handle_crop(self):
         if self.loading_now:
             return
@@ -731,7 +746,10 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
 
         size_change = new_size / orig_size
         self.percent_change.setText('%d%%' % int(100*size_change))
-        self.pixel_count.setText('%d pixels' % new_size)
+        if new_size < 5000:
+            self.pixel_count.setText("<font color='red'><b>%d pixels</b></font>" % new_size)
+        else:
+            self.pixel_count.setText("%d pixels" % new_size)
 
     def set_ef_ops_enabled(self, enabled):
         self.action_fetch.setEnabled(enabled)
@@ -827,6 +845,9 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
     def handle_openeventsforce(self):
         if self.current_person is not None:
             QtGui.QDesktopServices.openUrl(QtCore.QUrl('https://www.eventsforce.net/libdems/backend/home/codEditMain.csp?codReadOnly=1&personID=%d&curPage=1' % self.current_person.id))
+
+    def handle_editimage(self):
+        pass
 
 def setup():
     datadir = QtGui.QDesktopServices.storageLocation(QtGui.QDesktopServices.DataLocation)
