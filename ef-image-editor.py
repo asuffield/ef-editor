@@ -10,7 +10,7 @@ from PyQt4 import QtCore, QtGui
 from ef.ui.editor import Ui_ImageEdit
 from ef.ui.fetch_wizard import Ui_LoadPeopleWizard
 from ef.ui.upload_wizard import Ui_UploadPeopleWizard
-from ef.db import Person, Photo, setup_session, FindRegistrations, Event, dbmanager
+from ef.db import Person, Photo, setup_session, FindRegistrations, FindCategories, FindPoliceStatus, Event, FetchPhotoHistory, dbmanager
 from ef.photocache import ThumbnailCache, PhotoImageCache
 from ef.photodownload import PhotoDownloader
 from ef.fetch import Fetcher
@@ -32,6 +32,7 @@ class ImageListItem(QtGui.QStandardItem):
         self.downloader = downloader
         self.photo_load_retries = 0
         self.loading = False
+        self.db_loaded = False
         self.registrations = []
         self.findregistrations = FindRegistrations(person_id)
         self.findregistrations.finished.connect(self.registrations_updated)
@@ -89,6 +90,9 @@ class ImageListItem(QtGui.QStandardItem):
                 return None
             return self.photo.id
 
+        if role == QtCore.Qt.UserRole+8:
+            return self.db_loaded
+
         return None
 
     def person_updated(self, origin):
@@ -109,7 +113,9 @@ class ImageListItem(QtGui.QStandardItem):
         if origin == 'CropFrame':
             return
         self.loading = False
+        self.db_loaded = True
         self.photo_load_retries = 0
+        # Populate the disk cache in the background, but don't load into the application just yet
         self.downloader.download_photo(self.photo.id, self.photo.url, self.photo.full_path(), background=True)
         self.emitDataChanged()
 
@@ -289,7 +295,8 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         self.setupUi(self)
 
         self.settings = QtCore.QSettings()
-        
+
+        self.history_make_current.setIcon(self.style().standardIcon(QtGui.QStyle.SP_ArrowRight))
         self.back.setIcon(self.style().standardIcon(QtGui.QStyle.SP_ArrowBack))
         self.forwards.setIcon(self.style().standardIcon(QtGui.QStyle.SP_ArrowForward))
         self.back.setDisabled(True)
@@ -347,6 +354,23 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         self.filter_category.currentIndexChanged[str].connect(self.person_model_proxy.set_category)
         self.filter_police.currentIndexChanged[str].connect(self.person_model_proxy.set_police_status)
         self.filter_by_size.stateChanged.connect(self.person_model_proxy.set_only_bad_sizes)
+
+        self.findcategories = FindCategories()
+        self.findcategories.finished.connect(self.handle_categories)
+        self.findcategories.run()
+
+        self.findpolicestatus = FindPoliceStatus()
+        self.findpolicestatus.finished.connect(self.handle_policestatus)
+        self.findpolicestatus.run()
+
+        self.history_model = QtGui.QStandardItemModel(self)
+        self.history_model.setColumnCount(1)
+
+        self.history_list.setModel(self.history_model)
+        self.history_items = {}
+        self.fetchphotohistory = FetchPhotoHistory()
+        self.fetchphotohistory.ready.connect(self.handle_photohistory)
+        self.history_make_current.clicked.connect(self.handle_historymakecurrent)
 
         dbmanager.created.connect(self.handle_db_created)
         Person.signal_existing_created()
@@ -484,6 +508,7 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         self.preview_image.setPixmap(QtGui.QPixmap())
         self.person_name.setText(u'')
         self.upload_wizard.upload_photos_thisname.setText('')
+        self.history_model.clear()
 
     def foreach_item(self, f):
         for item in self.image_list_items.itervalues():
@@ -530,7 +555,8 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
             return
 
         self.photo_load_failed = False
-        self.load_person(current.data(QtCore.Qt.UserRole))
+        person_id = current.data(QtCore.Qt.UserRole)
+        self.load_person(person_id)
 
     def handle_model_item_changed(self, item):
         changed_index = self.person_model_proxy.mapFromSource(item.index())
@@ -583,6 +609,45 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
                                              fail_cb=self.handle_photo_fail,
                                              urgent=True, refresh=refresh,
                                              )
+            self.fetchphotohistory.run(p.id)
+
+    def handle_photohistory(self, person_id):
+        if not self.current_person or self.current_person.id != person_id:
+            return
+        photos = self.fetchphotohistory.get_photos(person_id)
+        if photos is None:
+            return
+        self.history_model.clear()
+        self.history_items = {}
+        for photo in sorted(photos, key=lambda photo: photo.date_fetched, reverse=True):
+            item = QtGui.QStandardItem()
+            msg = "Fetched at %s" % time.ctime(photo.date_fetched)
+            if self.current_person.current_photo_id == photo.id:
+                msg = msg + "\nCurrent photo"
+            else:
+                msg = msg + "\n%s" % photo.opinion
+            item.setText(msg)
+            item.setTextAlignment(QtCore.Qt.AlignCenter)
+            item.setData(photo.id)
+            self.history_items[photo.id] = item
+            self.history_model.appendRow(item)
+            self.list_photo_cache.load_image(photo.id, photo.full_path(), photo.url,
+                                             ready_cb=self.handle_history_photo_ready)
+
+    def handle_history_photo_ready(self, photo_id, pixmap):
+        item = self.history_items.get(photo_id, None)
+        if item is not None:
+            item.setData(pixmap, QtCore.Qt.DecorationRole)
+
+    def handle_historymakecurrent(self):
+        if not self.current_person:
+            return
+        item = self.history_model.itemFromIndex(self.history_list.currentIndex())
+        if item is None:
+            return
+        photo_id = item.data().toPyObject()
+        if photo_id != self.current_person.current_photo_id:
+            self.current_person.update_current_photo(photo_id)
 
     def handle_reloadphoto(self):
         if self.current_person is not None:
@@ -873,8 +938,15 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
             QtGui.QDesktopServices.openUrl(QtCore.QUrl('https://www.eventsforce.net/libdems/backend/home/codEditMain.csp?codReadOnly=1&personID=%d&curPage=1' % self.current_person.id))
 
     def handle_editimage(self):
-        self.person_model_proxy.invalidate()
         pass
+
+    def handle_categories(self):
+        for category in self.findcategories.result():
+            self.filter_category.addItem(category)
+
+    def handle_policestatus(self):
+        for status in self.findpolicestatus.result():
+            self.filter_police.addItem(status)
 
 def setup():
     datadir = QtGui.QDesktopServices.storageLocation(QtGui.QDesktopServices.DataLocation)

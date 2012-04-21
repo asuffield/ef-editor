@@ -42,8 +42,8 @@ class UploadTask(Task, NetFuncs):
     def complete(self):
         self.completed.emit(not self.skipped)
 
-    def handle_exception(self, e):
-        self.error.emit(str(e))
+    def handle_exception(self, e, msg):
+        self.error.emit(msg)
 
     def person_updated(self, origin):
         if origin != 'bind':
@@ -176,6 +176,7 @@ class UploadTask(Task, NetFuncs):
             # retry loop is being constructed here - can't reproduce reliably so one piece at a time
             soup = yield self.get(link)
             print link
+            print soup
             soup = yield self.submit_form(soup.form)
             print soup
         

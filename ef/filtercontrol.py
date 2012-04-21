@@ -43,6 +43,9 @@ class FilterProxyModel(QtGui.QSortFilterProxyModel):
         model = self.sourceModel()
 
         size = model.data(index, QtCore.Qt.UserRole+5).toPyObject()
+        if size is None:
+            return True
+
         width, height = size
         if width * height == 0:
             photo_id = model.data(index, QtCore.Qt.UserRole+7).toPyObject()
@@ -55,7 +58,7 @@ class FilterProxyModel(QtGui.QSortFilterProxyModel):
             else:
                 return False
 
-        if (width * height) < 5000:
+        if (width * height) < 20000:
             return False
 
         space_used = (6 * height) / (8 * width)
@@ -81,9 +84,6 @@ class FilterProxyModel(QtGui.QSortFilterProxyModel):
             id, ok = model.data(index, QtCore.Qt.UserRole).toInt()
             return self.id == id
 
-        name = model.data(index, QtCore.Qt.DisplayRole).toPyObject()
-        opinion = model.data(index, QtCore.Qt.UserRole+2).toPyObject()
-
         # Hack, until I have the patience to figure out what's going
         # on here. The filter has an invalid mapToSource mapping for
         # quite a long time before it starts working, and the sort
@@ -97,16 +97,16 @@ class FilterProxyModel(QtGui.QSortFilterProxyModel):
                 self.startup_hack = False
                 self.invalidate()
 
-        if name is None or opinion is None:
-            # This should really be False - they're still loading, and should not be displayed yet. However, for some reason
-            #print "Discarding", name, opinion
+        db_loaded = model.data(index, QtCore.Qt.UserRole+8).toPyObject()
+        if not db_loaded:
+            # Filter out things which are still loading for the first
+            # time (but not things which have changed and are being
+            # reloaded, because that messes up selections)
             return False
 
-        if opinion is None:
-            return True
-
         if self.name:
-            if self.name not in name:
+            name = model.data(index, QtCore.Qt.DisplayRole).toPyObject()
+            if name is not None and unicode(self.name).lower() not in unicode(name).lower():
                 return False
 
         if self.only_bad_sizes:
@@ -114,28 +114,30 @@ class FilterProxyModel(QtGui.QSortFilterProxyModel):
                 return False
 
         if self.opinion != 'any':
-            if opinion != self.opinion:
+            opinion = model.data(index, QtCore.Qt.UserRole+2).toPyObject()
+            if opinion is not None and opinion != self.opinion:
                 return False
 
         if self.police_status != 'any':
             police_status = model.data(index, QtCore.Qt.UserRole+3).toString()
-            if police_status != self.police_status:
+            if police_status is not none and police_status != self.police_status:
                 return False
 
         if self.category != 'any' or self.event_id:
             registrations = model.data(index, QtCore.Qt.UserRole+4).toList()
-            matched_reg = False
-            for variant in registrations:
-                registration = variant.toPyObject()
-                if self.category != 'any':
-                    if registration.attendee_type != self.category:
-                        continue
-                if self.event_id:
-                    if registration.event_id != self.event_id:
-                        continue
-                matched_reg = True
-                break
-            if not matched_reg:
-                return False
+            if registrations is not None:
+                matched_reg = False
+                for variant in registrations:
+                    registration = variant.toPyObject()
+                    if self.category != 'any':
+                        if registration.attendee_type != self.category:
+                            continue
+                    if self.event_id:
+                        if registration.event_id != self.event_id:
+                            continue
+                    matched_reg = True
+                    break
+                if not matched_reg:
+                    return False
 
         return True

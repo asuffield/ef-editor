@@ -186,7 +186,7 @@
               <item row="0" column="1">
                <widget class="QCheckBox" name="filter_by_size">
                 <property name="text">
-                 <string>Only photos with bad sizes</string>
+                 <string>Only photos with poor sizes</string>
                 </property>
                </widget>
               </item>
@@ -448,9 +448,15 @@
          <attribute name="title">
           <string>History</string>
          </attribute>
-         <layout class="QHBoxLayout" name="horizontalLayout_11">
+         <layout class="QVBoxLayout" name="verticalLayout_9">
           <item>
            <widget class="QListView" name="history_list">
+            <property name="editTriggers">
+             <set>QAbstractItemView::NoEditTriggers</set>
+            </property>
+            <property name="showDropIndicator" stdset="0">
+             <bool>false</bool>
+            </property>
             <property name="movement">
              <enum>QListView::Static</enum>
             </property>
@@ -461,10 +467,35 @@
              <bool>false</bool>
             </property>
             <property name="viewMode">
-             <enum>QListView::IconMode</enum>
+             <enum>QListView::ListMode</enum>
             </property>
             <property name="wordWrap">
              <bool>true</bool>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QToolButton" name="history_make_current">
+            <property name="sizePolicy">
+             <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
+              <horstretch>0</horstretch>
+              <verstretch>0</verstretch>
+             </sizepolicy>
+            </property>
+            <property name="minimumSize">
+             <size>
+              <width>0</width>
+              <height>0</height>
+             </size>
+            </property>
+            <property name="text">
+             <string>Make current</string>
+            </property>
+            <property name="toolButtonStyle">
+             <enum>Qt::ToolButtonTextUnderIcon</enum>
+            </property>
+            <property name="arrowType">
+             <enum>Qt::NoArrow</enum>
             </property>
            </widget>
           </item>

@@ -68,8 +68,8 @@ class PhotoCacheBase(QtCore.QObject):
         self.downloader.error.connect(self.fail)
 
     def load_image(self, id, filename, url, ready_cb=None, fail_cb=None, refresh=False, urgent=False, background=False):
-        if id in self.loading:
-            return
+        if filename is None:
+            return None
 
         if not refresh:
             photo = self.cache[id]
@@ -78,10 +78,11 @@ class PhotoCacheBase(QtCore.QObject):
                     ready_cb(id, photo)
                 return
 
-        if filename is None:
-            return None
-
         self.handlers.setdefault(id, []).append({'ready': ready_cb, 'fail': fail_cb})
+
+        if id in self.loading:
+            return
+
         self.loading[id] = filename
 
         if url is None:

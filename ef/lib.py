@@ -41,9 +41,13 @@ class SignalGroup(QtCore.QObject):
         QtCore.QObject.__init__(self)
         self.pending = set()
         self.fired = False
+        # We need the extra function to capture signal by value
+        # instead of by reference, by creating a new scope
+        def create_handler(signal):
+          return lambda *args, **kwargs: self.handle_signal(signal)
         for signal in signals:
             self.pending.add(signal)
-            signal.connect(lambda *args, **kwargs: self.handle_signal(signal))
+            signal.connect(create_handler(signal))
 
     def handle_signal(self, signal):
         self.pending.discard(signal)

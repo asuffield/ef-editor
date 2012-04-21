@@ -6,6 +6,7 @@ from PyQt4 import QtCore, QtSql
 from ef.threads import WorkerThread
 from collections import deque, OrderedDict
 from ef.task import Finishable
+from ef.lib import LRUCache, SignalGroup
 
 photodir = None
 
@@ -630,6 +631,11 @@ class Person(DBBase):
     def __str__(self):
         return u"%d: %s" % (self.id, self.fullname)
 
+    def update_current_photo(self, photo_id, origin=''):
+        self.update({'id': self.id,
+                     'current_photo_id': photo_id,
+                     }, origin)
+
 class Registration(DBBase):
     __tablename__ = 'registration'
     __key__ = ['person_id', 'event_id']
@@ -759,6 +765,69 @@ class FindRegistrations(Query):
             return Registration(key={'person_id': self.person_id, 'event_id': event_id})
             
         return map(unpack_row, self.rows())
+
+class FindCategories(Query):
+    def __init__(self):
+        Query.__init__(self, 'select distinct attendee_type from registration')
+
+    def result(self):
+        return map(lambda row: row[0].toString(), self.rows())        
+
+class FindPoliceStatus(Query):
+    def __init__(self):
+        Query.__init__(self, 'select distinct police_status from person')
+
+    def result(self):
+        return map(lambda row: row[0].toString(), self.rows())        
+
+class FetchPhotoHistory(QtCore.QObject):
+    ready = QtCore.pyqtSignal(int)
+
+    def __init__(self):
+        QtCore.QObject.__init__(self)
+        self.query = None
+        self.photos = None
+        self.people = LRUCache(size_limit=10)
+        self.current_person = None
+        self.next_person = None
+
+    def run(self, person_id):
+        if self.query is not None and not self.query.is_finished:
+            self.next_person = person_id
+            return
+
+        self.current_person = person_id
+        self.query = Query('select id from photo where person_id = :person_id', {'person_id': person_id})
+        self.query.finished.connect(self.handle_query)
+        self.query.run()
+
+    def handle_query(self):
+        self.photos = []
+        signals = []
+        for row in self.query.rows():
+            photo_id, ok = row[0].toInt()
+            photo = Photo(photo_id)
+            self.photos.append(photo)
+            signals.append(photo.updated)
+        self.signalgroup = SignalGroup(*signals)
+        self.signalgroup.fire.connect(self.handle_photos)
+
+    def handle_photos(self):
+        if self.current_person is None or self.photos is None:
+            # Should never happen...
+            return
+
+        self.people[self.current_person] = self.photos
+        self.ready.emit(self.current_person)
+
+        self.current_person = None
+        self.query = None
+        if self.next_person is not None:
+            self.run(self.next_person)
+            self.next_person = None
+
+    def get_photos(self, person_id):
+        return self.people[person_id]
 
 class FetchedPhotoWorker(QtCore.QObject):
     finished = QtCore.pyqtSignal()
