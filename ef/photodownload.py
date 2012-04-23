@@ -107,11 +107,14 @@ class PhotoDownloadWorker(QtCore.QObject):
         self.cleanup_task()
         self.start_task()
 
-    def handle_task_exception(self, e, str):
+    def handle_task_exception(self, e, msg):
         print e, self.current_task.url
         if self.current_task is None:
             return
-        self.error.emit(self.current_task.id, str)
+        if isinstance(e, IOError):
+            self.error.emit(self.current_task.id, str(e))
+        else:
+            self.error.emit(self.current_task.id, msg)
         self.cleanup_task()
         self.start_task()
 

@@ -2,6 +2,7 @@ import os
 import weakref
 import time
 import traceback
+import shutil
 from PyQt4 import QtCore, QtSql
 from ef.threads import WorkerThread
 from collections import deque, OrderedDict
@@ -557,6 +558,7 @@ class Photo(DBBase):
     __key__ = ['id']
     __fields__ = {'id': conv_int,
                   'url' : conv_unicode,
+                  'filename' : conv_unicode,
                   'width': conv_int,
                   'height': conv_int,
                   'date_fetched' : conv_float,
@@ -577,7 +579,9 @@ class Photo(DBBase):
 
     def full_path(self):
         filename = self.url_filename()
-        if filename is not None:
+        if not filename:
+            filename = self.filename
+        if filename:
             return os.path.join(photodir, filename)
 
     def update_crop(self, centre_x, centre_y, scale, origin=''):
@@ -832,19 +836,24 @@ class FetchPhotoHistory(QtCore.QObject):
 class FetchedPhotoWorker(QtCore.QObject):
     finished = QtCore.pyqtSignal()
 
-    def __init__(self, person_id, url, batch, opinion):
+    def __init__(self, person_id, url, batch, opinion=None, local_filename=None):
         QtCore.QObject.__init__(self)
         self.person_id = person_id
         self.url = url
+        self.local_filename = local_filename
         self.opinion = opinion
         self.first_batch = Batch(batch)
         self.second_batch = Batch(batch)
 
     def find_photo(self):
         query = QtSql.QSqlQuery()
-        query.prepare('select id from photo where person_id = :person_id and url = :url')
+        if self.url is not None:
+            query.prepare('select id from photo where person_id = :person_id and url = :url')
+            query.bindValue(':url', self.url)
+        else:
+            query.prepare('select id from photo where person_id = :person_id and filename = :filename')
+            query.bindValue(':filename', self.local_filename)
         query.bindValue(':person_id', self.person_id)
-        query.bindValue(':url', self.url)
         query.setForwardOnly(True)
         query.exec_()
         if query.next():
@@ -869,7 +878,11 @@ class FetchedPhotoWorker(QtCore.QObject):
             values.update(new_values)
             dbmanager.update('photo', values, 'FetchedPhoto', DBBase.batch_op(self.first_batch))
         else:
-            values = {'url': self.url, 'person_id': self.person_id}
+            values = {'person_id': self.person_id}
+            if self.url is not None:
+                values['url'] = self.url
+            if self.local_filename is not None:
+                values['filename'] = self.local_filename
             values.update(new_values)
             dbmanager.upsert('photo', values, 'FetchedPhoto', DBBase.batch_op(self.first_batch))
 
@@ -884,15 +897,20 @@ class FetchedPhotoWorker(QtCore.QObject):
 class FetchedPhoto(QtCore.QObject):
     sig_run = QtCore.pyqtSignal()
 
-    def __init__(self, person_id, url, batch, opinion=None):
+    def __init__(self, *args, **kwargs):
         QtCore.QObject.__init__(self)
 
-        self.worker = FetchedPhotoWorker(person_id, url, batch, opinion)
+        self.worker = FetchedPhotoWorker(*args, **kwargs)
         self.worker.moveToThread(dbmanager.worker)
         self.sig_run.connect(self.worker.run)
 
     def run(self):
         self.sig_run.emit()
+
+def stash_photo(filename):
+    local_filename = os.path.basename(filename)
+    shutil.copy(filename, os.path.join(photodir, local_filename))
+    return local_filename
 
 def setup_session(datadir):
     global engine, photodir
@@ -927,6 +945,7 @@ def setup_session(datadir):
         query.exec_('''CREATE TABLE photo (
                        id INTEGER NOT NULL,
                        url VARCHAR,
+                       filename varchar,
                        date_fetched DATETIME,
                        person_id INTEGER,
                        width integer default 0,
@@ -945,6 +964,8 @@ def setup_session(datadir):
                        CONSTRAINT photo_opinion CHECK (opinion IN ('ok', 'bad', 'unsure'))
                        )''')
     else:
+        if not photo_record.contains('filename'):
+            query.exec_('''alter table photo add column filename varchar''')
         if not photo_record.contains('width'):
             query.exec_('''alter table photo add column width integer default 0''')
         if not photo_record.contains('height'):

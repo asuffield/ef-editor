@@ -10,7 +10,7 @@ from PyQt4 import QtCore, QtGui
 from ef.ui.editor import Ui_ImageEdit
 from ef.ui.fetch_wizard import Ui_LoadPeopleWizard
 from ef.ui.upload_wizard import Ui_UploadPeopleWizard
-from ef.db import Person, Photo, setup_session, FindRegistrations, FindCategories, FindPoliceStatus, Event, FetchPhotoHistory, dbmanager
+from ef.db import Person, Photo, setup_session, FindRegistrations, FindCategories, FindPoliceStatus, Event, FetchPhotoHistory, Batch, FetchedPhoto, dbmanager, stash_photo
 from ef.photocache import ThumbnailCache, PhotoImageCache
 from ef.photodownload import PhotoDownloader
 from ef.fetch import Fetcher
@@ -20,6 +20,7 @@ from ef.netlib import start_network_manager
 from ef.filtercontrol import FilterProxyModel
 from collections import deque
 from datetime import datetime
+from PIL import Image
 
 class ImageListItem(QtGui.QStandardItem):
     def __init__(self, downloader, photo_cache, person_id):
@@ -421,6 +422,12 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         self.action_reloadphoto.triggered.connect(self.handle_reloadphoto)
         self.action_editimage.triggered.connect(self.handle_editimage)
         self.editimage.clicked.connect(self.handle_editimage)
+        self.action_importphoto.triggered.connect(self.handle_import)
+
+        self.openimage = QtGui.QFileDialog(self, 'Import image')
+        self.openimage.setFileMode(QtGui.QFileDialog.ExistingFile)
+        self.openimage.setNameFilter('*.jpg *.jpeg')
+        self.openimage.restoreState(self.settings.value('openimage-state', '').toByteArray())
 
         self.status_expiry_timer = QtCore.QTimer(self)
         self.status_expiry_timer.setInterval(5000)
@@ -499,7 +506,6 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         self.status_expiry_timer.start()
 
     def clear_image(self):
-        self.current_person = None
         self.current_photo = None
         self.current_image = None
         self.image_draw_needed = False
@@ -508,7 +514,6 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         self.preview_image.setPixmap(QtGui.QPixmap())
         self.person_name.setText(u'')
         self.upload_wizard.upload_photos_thisname.setText('')
-        self.history_model.clear()
 
     def foreach_item(self, f):
         for item in self.image_list_items.itervalues():
@@ -597,10 +602,22 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
             while len(self.history_back) > 10:
                 self.history_back.popleft()
 
+        self.clear_image()
+        self.history_model.clear()
+        self.current_person = p
+
+        self.info_person_id.setText('%d' % self.current_person.id)
+        self.info_fullname.setText(self.current_person.fullname)
+        self.info_title.setText(self.current_person.title)
+        self.info_firstname.setText(self.current_person.firstname)
+        self.info_lastname.setText(self.current_person.lastname)
+        self.info_police_status.setText(self.current_person.police_status)
+        self.info_person_fetched_at.setText(time.ctime(self.current_person.last_checked_at))
+
         if photo is not None and photo.full_path() is not None:
-            self.clear_image()
-            self.current_person = p
             self.current_photo = photo
+            self.info_photo_filename.setText(self.current_photo.url_filename())
+            self.info_photo_fetched_at.setText(time.ctime(self.current_photo.date_fetched))
             self.person_name.setText(u'Loading %s...' % p)
             self.upload_wizard.upload_photos_thisname.setText(str(p))
 
@@ -609,7 +626,10 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
                                              fail_cb=self.handle_photo_fail,
                                              urgent=True, refresh=refresh,
                                              )
-            self.fetchphotohistory.run(p.id)
+        else:
+            self.person_name.setText(unicode(self.current_person))
+
+        self.fetchphotohistory.run(p.id)
 
     def handle_photohistory(self, person_id):
         if not self.current_person or self.current_person.id != person_id:
@@ -742,15 +762,6 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         self.crop_frame.setup_new_image(width, height, self.current_photo)
         self.main_pixmap.show()
         self.person_name.setText(unicode(self.current_person))
-        self.info_person_id.setText('%d' % self.current_person.id)
-        self.info_fullname.setText(self.current_person.fullname)
-        self.info_title.setText(self.current_person.title)
-        self.info_firstname.setText(self.current_person.firstname)
-        self.info_lastname.setText(self.current_person.lastname)
-        self.info_police_status.setText(self.current_person.police_status)
-        self.info_person_fetched_at.setText(time.ctime(self.current_person.last_checked_at))
-        self.info_photo_filename.setText(self.current_photo.url_filename())
-        self.info_photo_fetched_at.setText(time.ctime(self.current_photo.date_fetched))
         self.main_image.fitInView(self.main_pixmap, QtCore.Qt.KeepAspectRatio)
 
         opinion = self.current_photo.opinion
@@ -939,6 +950,36 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
 
     def handle_editimage(self):
         pass
+
+    def handle_import(self):
+        if self.current_person is None:
+            print self.current_person
+            return
+
+        self.action_importphoto.setEnabled(False)
+
+        if not self.openimage.exec_():
+            return
+
+        QtCore.QSettings().setValue('openimage-state', self.openimage.saveState())
+
+        filenames = self.openimage.selectedFiles()
+        filename = str(filenames[0])
+        try:
+            Image.open(filename).verify()
+        except Exception, e:
+            QtGui.QMessageBox.information(self, "Error loading image", str(e))
+
+        local_filename = stash_photo(filename)
+
+        self.import_batch = Batch()
+        self.import_fetchedphoto = FetchedPhoto(self.current_person.id, None, self.import_batch, local_filename=local_filename)
+        self.import_fetchedphoto.run()
+        self.import_batch.finished.connect(self.handle_import_finished)
+        self.import_batch.finish()
+
+    def handle_import_finished(self):
+        self.action_importphoto.setEnabled(True)
 
     def handle_categories(self):
         for category in self.findcategories.result():

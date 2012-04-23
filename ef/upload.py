@@ -87,7 +87,7 @@ class UploadTask(Task, NetFuncs):
         new_size = image.size[0] * image.size[1]
 
         size_change = new_size / orig_size
-        if self.photo.rotate == 0 and (100 * abs(1 - size_change)) < self.minimum_change:
+        if self.photo.url and self.photo.rotate == 0 and (100 * abs(1 - size_change)) < self.minimum_change:
             # This photo hasn't changed enough so we'll skip it
             self.skipped = True
             self.completed.emit(False)

@@ -178,8 +178,8 @@
               <rect>
                <x>0</x>
                <y>0</y>
-               <width>305</width>
-               <height>402</height>
+               <width>277</width>
+               <height>170</height>
               </rect>
              </property>
              <layout class="QFormLayout" name="formLayout_2">
@@ -1316,16 +1316,23 @@
     <addaction name="action_editimage"/>
     <addaction name="action_openeventsforce"/>
    </widget>
+   <widget class="QMenu" name="menuPreferences">
+    <property name="title">
+     <string>Preferences</string>
+    </property>
+    <addaction name="actionChoose_image_editor"/>
+   </widget>
    <addaction name="menuActions"/>
+   <addaction name="menuPreferences"/>
   </widget>
   <action name="action_fetch">
    <property name="text">
-    <string>Fetch from eventsforce</string>
+    <string>Fetch from eventsforce...</string>
    </property>
   </action>
   <action name="action_upload">
    <property name="text">
-    <string>Upload to eventsforce</string>
+    <string>Upload to eventsforce...</string>
    </property>
   </action>
   <action name="action_editimage">
@@ -1350,7 +1357,12 @@
   </action>
   <action name="action_importphoto">
    <property name="text">
-    <string>Import photo</string>
+    <string>Import photo...</string>
+   </property>
+  </action>
+  <action name="actionChoose_image_editor">
+   <property name="text">
+    <string>Choose image editor...</string>
    </property>
   </action>
  </widget>
