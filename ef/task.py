@@ -51,7 +51,7 @@ class Finishable(object):
     def handle_finished_signal(self):
         self.is_finished = True
 
-    def handle_error_signal(self, e):
+    def handle_error_signal(self, e, *junk):
         self.is_finished = True
         self.finished_error = e
     
@@ -75,7 +75,7 @@ class FinishableWaitOp(TaskOp):
             if self.finishable.error_signal is not None:
                 self.finishable.error_signal.connect(self.throw)
 
-class Task(QtCore.QObject):
+class Task(QtCore.QObject, Finishable):
     task_finished = QtCore.pyqtSignal()
     task_aborted = QtCore.pyqtSignal()
     task_exception = QtCore.pyqtSignal(Exception, str)
@@ -84,7 +84,8 @@ class Task(QtCore.QObject):
     # the most recent operation to complete
 
     def __init__(self):
-        super(Task, self).__init__()
+        QtCore.QObject.__init__(self)
+        Finishable.__init__(self, self.task_finished, self.task_exception)
 
         self.task_coro = None
         self.current = None
@@ -135,7 +136,8 @@ class Task(QtCore.QObject):
         except StopIteration:
             self.task_finished.emit()
         except Exception, e:
-            self.task_exception.emit(e, traceback.format_exc())
+            trace = traceback.format_exc()
+            self.task_exception.emit(e, trace)
 
     def handle_finished(self, op_id):
         if op_id != self.current.get_op_id():
@@ -169,3 +171,21 @@ class Task(QtCore.QObject):
         if self.current is not None:
             self.current.abort()
         self.task_aborted.emit()
+
+class TaskList(Task):
+    def __init__(self, *tasks):
+        Task.__init__(self)
+
+        self.task_list = []
+
+        # This just flattens out iterables in the argument
+        for task in tasks:
+            try:
+                self.task_list.extend(list(task))
+            except TypeError:
+                self.task_list.append(task)
+
+    def task(self):
+        for task in self.task_list:
+            task.start_task()
+            yield self.wait(task)

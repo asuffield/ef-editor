@@ -6,7 +6,7 @@ import time
 from ef.threads import thread_registry
 from ef.login import LoginTask, LoginError
 from ef.nettask import NetFuncs
-from ef.task import Task
+from ef.task import Task, TaskList
 
 class PersonDBParser(EFDelegateParser):
     def __init__(self, progress, batch):
@@ -49,17 +49,17 @@ def catcherror(func):
     return wrapped
 
 class ReportTask(Task, NetFuncs):
-    def __init__(self, worker):
+    def __init__(self, progress):
         Task.__init__(self)
         NetFuncs.__init__(self)
 
-        self.worker = worker
+        self.progress = progress
     
     def task(self):
         self.batch = Batch()
-        self.parser = PersonDBParser(self.worker.progress, self.batch)
+        self.parser = PersonDBParser(self.progress, self.batch)
 
-        self.worker.progress.emit('Running report', 0, 0)
+        self.progress.emit('Running report', 0, 0)
         soup = yield self.get('https://www.eventsforce.net/libdems/backend/home/dynaRepRun.csp?profileID=62', timeout=None)
     
         img = soup.find('img', title='Export to Excel')
@@ -67,7 +67,7 @@ class ReportTask(Task, NetFuncs):
             raise FetchError("Failed to parse response from eventsforce (didn't have Export link)")
         link = img.parent
 
-        self.worker.progress.emit('Downloading results', 0, 0)
+        self.progress.emit('Downloading results', 0, 0)
 
         self.report_op = self.get_raw(link['href'], timeout=120)
         self.report_op.reply.readyRead.connect(self.report_get_data)
@@ -85,21 +85,21 @@ class ReportTask(Task, NetFuncs):
         self.parser.feed(self.report_op.result())
 
     def handle_commit_progress(self, cur, max):
-        self.worker.progress.emit('Saving people', cur, max)
+        self.progress.emit('Saving people', cur, max)
 
 class PhotosTask(Task, NetFuncs):
-    def __init__(self, worker, which, batch):
+    def __init__(self, progress, which, batch):
         Task.__init__(self)
         NetFuncs.__init__(self)
 
-        self.worker = worker
+        self.progress = progress
         self.which = which
         self.batch = batch
 
     def task(self):
         find_photos = FindPhotos(self.which)
         find_photos.run()
-        self.worker.progress.emit('Finding photos', 0, 0)
+        self.progress.emit('Finding photos', 0, 0)
         yield self.wait(find_photos)
         
         self.db_tasks = []
@@ -107,7 +107,7 @@ class PhotosTask(Task, NetFuncs):
         people = find_photos.result()
 
         for i, person_id in enumerate(people):
-            self.worker.progress.emit('Finding photos', i, len(people))
+            self.progress.emit('Finding photos', i, len(people))
             soup = yield self.get('https://www.eventsforce.net/libdems/backend/home/codEditMain.csp?codReadOnly=1&personID=%d&curPage=1' % person_id)
             img = soup.find('img', title='Picture Profile')
             if img is not None:
@@ -120,7 +120,16 @@ class PhotosTask(Task, NetFuncs):
         self.batch.progress.connect(self.handle_commit_progress)
 
     def handle_commit_progress(self, cur, max):
-        self.worker.progress.emit('Saving photo URLs', cur, max)
+        self.progress.emit('Saving photo URLs', cur, max)
+
+class FetchTask(TaskList):
+    def __init__(self, fetch_report, fetch_photos, username, password, progress, batch):
+        tasks = [LoginTask(username, password)]
+        if fetch_report:
+            tasks.append(ReportTask(progress))
+        if fetch_photos != 'none':
+            tasks.append(PhotosTask(progress, fetch_photos, batch))
+        TaskList.__init__(self, tasks)
 
 class FetchWorker(QtCore.QObject):
     completed = QtCore.pyqtSignal()
@@ -128,31 +137,19 @@ class FetchWorker(QtCore.QObject):
     progress = QtCore.pyqtSignal(str, int, int)
     
     def __init__(self):
-        super(QtCore.QObject, self).__init__()
-
-        self.tasks = None
+        QtCore.QObject.__init__(self)
 
     @QtCore.pyqtSlot(bool, str, str, str)
     @catcherror
     def start_fetch(self, fetch_report, fetch_photos, username, password):
         self.batch = Batch()
-        self.tasks = tasks = [LoginTask(username, password)]
-        if fetch_report:
-            tasks.append(ReportTask(self))
-        if fetch_photos != 'none':
-            tasks.append(PhotosTask(self, fetch_photos, self.batch))
-
-        prev = None
-        for task in tasks:
-            if prev is not None:
-                prev.task_finished.connect(task.start_task)
-            task.task_exception.connect(self.handle_exception)
-            prev = task
-        prev.task_finished.connect(self.batch.finish)
+        self.task = FetchTask(fetch_report, fetch_photos, username, password, self.progress, self.batch)
+        self.task.task_finished.connect(self.batch.finish)
+        self.task.task_exception.connect(self.handle_exception)
         self.batch.finished.connect(self.completed)
-
         self.progress.emit('Logging in', 0, 0)
-        tasks[0].start_task()
+
+        self.task.start_task()
 
     def handle_exception(self, e, msg):
         if isinstance(e, LoginError):

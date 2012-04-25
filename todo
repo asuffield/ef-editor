@@ -23,8 +23,6 @@ General feature to allow backup
 
 use pyinstaller instead of py2exe
 
-Multiple simultaneous uploads, for speed? Downloads? Priority of those?
-
 Fetch recent changes (needs to handle date arguments to report)
 
 Sort display by date of last change, filter by date of last change
@@ -40,3 +38,5 @@ Deduplication reports
 Fix abuses of super() by getting rid of them. super() is insane
 
 Purge habitual getters/setters
+
+Multiple simultaneous uploads, for speed? Downloads? Priority of those?
