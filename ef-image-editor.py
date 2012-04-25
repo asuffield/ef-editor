@@ -8,12 +8,13 @@ import traceback
 import time
 from PyQt4 import QtCore, QtGui
 from ef.ui.editor import Ui_ImageEdit
-from ef.ui.fetch_wizard import Ui_LoadPeopleWizard
 from ef.ui.upload_wizard import Ui_UploadPeopleWizard
 from ef.db import Person, Photo, setup_session, FindRegistrations, FindCategories, FindPoliceStatus, Event, FetchPhotoHistory, Batch, FetchedPhoto, dbmanager, stash_photo
 from ef.photocache import ThumbnailCache, PhotoImageCache
 from ef.photodownload import PhotoDownloader
 from ef.fetch import Fetcher
+from ef.fetchreports import ReportsFetcher
+from ef.fetchwizard import FetchWizard
 from ef.upload import Uploader
 from ef.threads import thread_registry
 from ef.netlib import start_network_manager
@@ -273,13 +274,6 @@ class EditPixmap(QtGui.QGraphicsPixmapItem):
     def wheelEvent(self, event):
         self.wheel_event.emit(event.delta())
 
-class LoadPeopleWizard(QtGui.QWizard, Ui_LoadPeopleWizard):
-    def __init__(self, parent=None):
-        super(QtGui.QWizard, self).__init__(parent)
-        self.setupUi(self)
-
-        self.setButtonText(QtGui.QWizard.FinishButton, 'Start download')
-
 class UploadPeopleWizard(QtGui.QWizard, Ui_UploadPeopleWizard):
     def __init__(self, parent=None):
         super(QtGui.QWizard, self).__init__(parent)
@@ -307,6 +301,7 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         self.list_photo_cache = ThumbnailCache(self.photodownloader, 100)
         self.main_photo_cache = PhotoImageCache(self.photodownloader, 10)
         self.fetcher = Fetcher()
+        self.reportsfetcher = ReportsFetcher()
         self.uploader = Uploader()
         self.current_person = None
         self.current_photo = None
@@ -318,7 +313,6 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         self.history_forwards = deque()
         self.suppress_history = False
 
-        self.fetch_wizard = LoadPeopleWizard()
         self.upload_wizard = UploadPeopleWizard()
 
         self.image_list_items = {}
@@ -389,12 +383,12 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         self.search_for.returnPressed.connect(self.handle_search)
 
         self.action_fetch.triggered.connect(self.handle_fetch_wizard)
-        self.fetch_wizard.accepted.connect(self.handle_fetch)
-        self.fetch_wizard.rejected.connect(self.handle_fetch_rejected)
 
         self.fetcher.completed.connect(self.handle_fetch_completed)
         self.fetcher.error.connect(self.handle_fetch_error)
         self.fetcher.progress.connect(self.handle_fetch_progress)
+
+        self.reportsfetcher.error.connect(self.handle_reportsfetch_error)
 
         self.action_upload.triggered.connect(self.handle_upload_wizard)
         self.upload_wizard.accepted.connect(self.handle_upload)
@@ -849,32 +843,24 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         self.action_upload.setEnabled(enabled)
 
     def handle_fetch_wizard(self):
-        self.fetch_wizard.ef_username.setText(self.settings.value('ef-username', '').toString())
+        self.fetch_wizard = FetchWizard()
+        self.fetch_wizard.start_fetch.connect(self.fetcher.start_fetch)
+        self.fetch_wizard.rejected.connect(self.handle_fetch_rejected)
+        self.fetch_wizard.start_fetch_reports.connect(self.reportsfetcher.start_fetch)
+        self.reportsfetcher.completed.connect(self.fetch_wizard.reports_ready)
         self.fetch_wizard.show()
         self.set_ef_ops_enabled(False)
 
     def handle_fetch_rejected(self):
         self.set_ef_ops_enabled(True)
 
-    def handle_fetch(self):
-        self.fetch_wizard.restart()
-        
-        fetch_people_report = self.fetch_wizard.fetch_people_report.isChecked()
-        fetch_photos = 'none'
-        if self.fetch_wizard.fetch_photos_missing.isChecked():
-            fetch_photos = 'missing'
-        elif self.fetch_wizard.fetch_photos_all.isChecked():
-            fetch_photos = 'all'
-        username = str(self.fetch_wizard.ef_username.text())
-        password = str(self.fetch_wizard.ef_password.text())
-
-        QtCore.QSettings().setValue('ef-username', username)
-
-        self.fetcher.start_fetch(fetch_people_report, fetch_photos, username, password)
-
     def handle_fetch_completed(self):
         self.set_ef_ops_enabled(True)
         self.status_finished()
+
+    def handle_reportsfetch_error(self, err):
+        print >>sys.stderr, err
+        QtGui.QMessageBox.information(self, "Error during fetch of reports list", err)
 
     def handle_fetch_error(self, err):
         print >>sys.stderr, err

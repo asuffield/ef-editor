@@ -49,19 +49,20 @@ def catcherror(func):
     return wrapped
 
 class ReportTask(Task, NetFuncs):
-    def __init__(self, progress):
+    def __init__(self, report, progress):
         Task.__init__(self)
         NetFuncs.__init__(self)
 
         self.progress = progress
+        self.report = report
     
     def task(self):
         self.batch = Batch()
         self.parser = PersonDBParser(self.progress, self.batch)
 
         self.progress.emit('Running report', 0, 0)
-        soup = yield self.get('https://www.eventsforce.net/libdems/backend/home/dynaRepRun.csp?profileID=62', timeout=None)
-    
+        soup = yield self.get('https://www.eventsforce.net/libdems/backend/home/dynaRepRun.csp?profileID=%s' % self.report, timeout=None)
+
         img = soup.find('img', title='Export to Excel')
         if img is None:
             raise FetchError("Failed to parse response from eventsforce (didn't have Export link)")
@@ -126,7 +127,7 @@ class FetchTask(TaskList):
     def __init__(self, fetch_report, fetch_photos, username, password, progress, batch):
         tasks = [LoginTask(username, password)]
         if fetch_report:
-            tasks.append(ReportTask(progress))
+            tasks.append(ReportTask(fetch_report, progress))
         if fetch_photos != 'none':
             tasks.append(PhotosTask(progress, fetch_photos, batch))
         TaskList.__init__(self, tasks)
@@ -139,7 +140,7 @@ class FetchWorker(QtCore.QObject):
     def __init__(self):
         QtCore.QObject.__init__(self)
 
-    @QtCore.pyqtSlot(bool, str, str, str)
+    @QtCore.pyqtSlot(int, str, str, str)
     @catcherror
     def start_fetch(self, fetch_report, fetch_photos, username, password):
         self.batch = Batch()
@@ -157,12 +158,8 @@ class FetchWorker(QtCore.QObject):
         else:
             self.error.emit(msg)
 
-        if self.tasks is not None:
-            for task in self.tasks:
-                task.abort()
-
 class Fetcher(QtCore.QObject):
-    sig_start_fetch = QtCore.pyqtSignal(bool, str, str, str)
+    sig_start_fetch = QtCore.pyqtSignal(int, str, str, str)
     
     def __init__(self):
         super(QtCore.QObject, self).__init__()

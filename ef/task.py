@@ -1,9 +1,10 @@
 from PyQt4 import QtCore
 import traceback
+import sys
 
 class TaskOp(QtCore.QObject):
     _finished = QtCore.pyqtSignal(int)
-    _exception = QtCore.pyqtSignal(Exception, int)
+    _exception = QtCore.pyqtSignal(Exception, int, dict)
     
     def __init__(self):
         super(TaskOp, self).__init__()
@@ -24,9 +25,8 @@ class TaskOp(QtCore.QObject):
         self._finished.emit(self.op_id)
         self.task_done = True
 
-    @QtCore.pyqtSlot(Exception)
-    def throw(self, e):
-        self._exception.emit(e, self.op_id)
+    def throw(self, e, msg=None, blob={}):
+        self._exception.emit(e, self.op_id, blob)
 
     @QtCore.pyqtSlot(Exception, int)
     def rethrow(self, e, op_id):
@@ -51,9 +51,9 @@ class Finishable(object):
     def handle_finished_signal(self):
         self.is_finished = True
 
-    def handle_error_signal(self, e, *junk):
+    def handle_error_signal(self, *args):
         self.is_finished = True
-        self.finished_error = e
+        self.finished_error = args
     
 class SignalWaitOp(TaskOp):
     def __init__(self, signal):
@@ -67,7 +67,7 @@ class FinishableWaitOp(TaskOp):
         TaskOp.__init__(self)
         self.finishable = finishable
         if self.finishable.finished_error is not None:
-            self.throw(self.finishable.finished_error)
+            self.throw(*self.finishable.finished_error)
         elif self.finishable.is_finished:
             self.finish()
         else:
@@ -78,7 +78,7 @@ class FinishableWaitOp(TaskOp):
 class Task(QtCore.QObject, Finishable):
     task_finished = QtCore.pyqtSignal()
     task_aborted = QtCore.pyqtSignal()
-    task_exception = QtCore.pyqtSignal(Exception, str)
+    task_exception = QtCore.pyqtSignal(Exception, str, dict)
 
     # Coroutines are expected to access self.current for facilities of
     # the most recent operation to complete
@@ -136,8 +136,9 @@ class Task(QtCore.QObject, Finishable):
         except StopIteration:
             self.task_finished.emit()
         except Exception, e:
+            tb = sys.exc_info()[2]
             trace = traceback.format_exc()
-            self.task_exception.emit(e, trace)
+            self.task_exception.emit(e, trace, {'traceback': tb})
 
     def handle_finished(self, op_id):
         if op_id != self.current.get_op_id():
@@ -147,7 +148,7 @@ class Task(QtCore.QObject, Finishable):
         result = self.current.result()
         self.continue_task(lambda: self.task_coro.send(result))
 
-    def handle_exception(self, op_id, e):
+    def handle_exception(self, e, op_id, blob):
         if op_id != self.current.get_op_id():
             # Stray signal from a previous op
             return
@@ -157,7 +158,7 @@ class Task(QtCore.QObject, Finishable):
         # We've got an exception. We want to throw it through the
         # coroutine in order to get a useful traceback, and possibly
         # allow the coroutine to handle the exception
-        self.continue_task(lambda: self.task_coro.throw(e))
+        self.continue_task(lambda: self.task_coro.throw(e, None, blob.get('traceback', None)))
 
     def wait(self, until):
         if isinstance(until, Finishable):

@@ -11,10 +11,10 @@ Detect errors when login details wrong
  - or other badness in eventsforce interactions?
  - when errors occur during photo uploading that we know are "just retry, EF sucks", retry them
 
+Disable 'finish' button in fetch wizard, until reports are loaded
+
 High priority features
 ----------------------
-Choice of which report to run
-
 Open image in real editor
 
 Vacuum and backup database on start
