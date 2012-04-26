@@ -917,7 +917,7 @@ def setup_session(datadir):
     photodir = os.path.join(datadir, 'photos')
     if not os.path.exists(photodir):
         os.mkdir(photodir)
-    dbfile = os.path.join(datadir, 'people.sqlite')
+    dbfile = os.path.join(datadir, 'database.sqlite')
 
     for i in reversed(xrange(0,9)):
         f1 = '%s.%d' % (dbfile, i)
