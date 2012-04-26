@@ -918,12 +918,25 @@ def setup_session(datadir):
     if not os.path.exists(photodir):
         os.mkdir(photodir)
     dbfile = os.path.join(datadir, 'people.sqlite')
+
+    for i in reversed(xrange(0,9)):
+        f1 = '%s.%d' % (dbfile, i)
+        f2 = '%s.%d' % (dbfile, i+1)
+        if os.path.exists(f2):
+            os.remove(f2)
+        if os.path.exists(f1):
+            os.rename(f1, f2)
+    if os.path.exists(dbfile):
+        shutil.copy(dbfile, '%s.0' % dbfile)
+    
     db = QtSql.QSqlDatabase.addDatabase('QSQLITE')
     db.setDatabaseName(dbfile)
     if not db.open():
         raise DBException("Failed to open db", db)
 
     query = QtSql.QSqlQuery()
+    query.exec_('vacuum')
+
     person_record = db.record('person')
     if person_record.isEmpty():
         query.exec_("""CREATE TABLE person (

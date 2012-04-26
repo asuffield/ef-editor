@@ -17,11 +17,9 @@ High priority features
 ----------------------
 Open image in real editor
 
-Vacuum and backup database on start
+use pyinstaller instead of py2exe
 
 General feature to allow backup
-
-use pyinstaller instead of py2exe
 
 Fetch recent changes (needs to handle date arguments to report)
 
