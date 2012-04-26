@@ -737,8 +737,8 @@
                 <rect>
                  <x>0</x>
                  <y>0</y>
-                 <width>325</width>
-                 <height>444</height>
+                 <width>269</width>
+                 <height>337</height>
                 </rect>
                </property>
                <layout class="QVBoxLayout" name="verticalLayout_8">
@@ -1320,7 +1320,7 @@
     <property name="title">
      <string>Preferences</string>
     </property>
-    <addaction name="actionChoose_image_editor"/>
+    <addaction name="action_chooseeditor"/>
    </widget>
    <addaction name="menuActions"/>
    <addaction name="menuPreferences"/>
@@ -1360,7 +1360,7 @@
     <string>Import photo...</string>
    </property>
   </action>
-  <action name="actionChoose_image_editor">
+  <action name="action_chooseeditor">
    <property name="text">
     <string>Choose image editor...</string>
    </property>

@@ -15,8 +15,6 @@ Disable 'finish' button in fetch wizard, until reports are loaded
 
 High priority features
 ----------------------
-Open image in real editor
-
 use pyinstaller instead of py2exe
 
 General feature to allow backup

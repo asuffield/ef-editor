@@ -6,6 +6,8 @@ import sys
 import os
 import traceback
 import time
+import tempfile
+import shutil
 from PyQt4 import QtCore, QtGui
 from ef.ui.editor import Ui_ImageEdit
 from ef.ui.upload_wizard import Ui_UploadPeopleWizard
@@ -423,6 +425,16 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         self.openimage.setNameFilter('*.jpg *.jpeg')
         self.openimage.restoreState(self.settings.value('openimage-state', '').toByteArray())
 
+        self.action_chooseeditor.triggered.connect(self.handle_chooseeditor)
+
+        self.chooseeditor = QtGui.QFileDialog(self, 'Choose image editor')
+        self.chooseeditor.setFileMode(QtGui.QFileDialog.ExistingFile)
+        if os.name == 'nt':
+            self.chooseeditor.setNameFilter('*.exe')
+        self.chooseeditor.restoreState(self.settings.value('chooseeditor-state', '').toByteArray())
+
+        self.image_editor = self.settings.value('image-editor', '').toString()
+
         self.status_expiry_timer = QtCore.QTimer(self)
         self.status_expiry_timer.setInterval(5000)
         self.status_expiry_timer.timeout.connect(self.status_idle)
@@ -441,6 +453,8 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         self.image_draw_needed = False
 
         self.photodownloader.queue_size.connect(self.status_downloader)
+
+        self.procs = {}
 
         self.status_idle()
 
@@ -934,12 +948,45 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         if self.current_person is not None:
             QtGui.QDesktopServices.openUrl(QtCore.QUrl('https://www.eventsforce.net/libdems/backend/home/codEditMain.csp?codReadOnly=1&personID=%d&curPage=1' % self.current_person.id))
 
+    def handle_chooseeditor(self):
+        if self.chooseeditor.exec_():
+            QtCore.QSettings().setValue('chooseeditor-state', self.chooseeditor.saveState())
+            filenames = self.chooseeditor.selectedFiles()
+            self.image_editor = str(filenames[0]) if filenames else None
+            QtCore.QSettings().setValue('image-editor', self.image_editor)
+
     def handle_editimage(self):
-        pass
+        if self.current_person is None or self.current_photo is None:
+            return
+
+        path = self.current_photo.full_path()
+        if not os.path.exists(path):
+            return
+
+        if not self.image_editor:
+            self.handle_chooseeditor()
+
+        if not self.image_editor:
+            return
+
+        f = open(path, 'rb')
+        tf = tempfile.NamedTemporaryFile(prefix='%d_%s_' % (self.current_person.id, self.current_person.fullname), suffix='.jpg', delete=False)
+        shutil.copyfileobj(f, tf)
+        tf.close()
+
+        proc = QtCore.QProcess(self)
+        proc.setProcessChannelMode(QtCore.QProcess.ForwardedChannels)
+        proc.start(self.image_editor, [tf.name])
+
+        pid = proc.pid()
+        self.procs[pid] = proc
+        proc.finished.connect(lambda: self.handle_process_finished(pid))
+
+    def handle_process_finished(self, pid):
+        proc = self.procs.pop(pid, None)
 
     def handle_import(self):
         if self.current_person is None:
-            print self.current_person
             return
 
         self.action_importphoto.setEnabled(False)
