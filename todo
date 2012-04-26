@@ -5,8 +5,6 @@ Photos with apostrophe in the url
 
 Error logging
 
-Do something with exceptions in the database thread
-
 Detect errors when login details wrong
  - or other badness in eventsforce interactions?
  - when errors occur during photo uploading that we know are "just retry, EF sucks", retry them

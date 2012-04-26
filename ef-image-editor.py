@@ -370,6 +370,7 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         self.history_make_current.clicked.connect(self.handle_historymakecurrent)
 
         dbmanager.created.connect(self.handle_db_created)
+        dbmanager.exception.connect(self.handle_db_exception)
         Person.signal_existing_created()
         Event.signal_existing_created()
 
@@ -939,6 +940,10 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
             event = self.events[id] = Event(id)
             handler = self.event_load_handlers[id] = lambda: self.filter_event.addItem(event.name, id)
             self.events[id].updated.connect(handler)
+
+    def handle_db_exception(self, e, msg):
+        print >>sys.stderr, msg
+        QtGui.QMessageBox.information(self, "Error while accessing database", msg)
 
     def handle_filter_event_changed(self, index):
         id = self.filter_event.itemData(index).toPyObject()

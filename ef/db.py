@@ -35,6 +35,7 @@ class DBWorker(QtCore.QObject):
     created = QtCore.pyqtSignal(str, dict, str)
     updated = QtCore.pyqtSignal(str, dict, str)
     pending = QtCore.pyqtSignal(int)
+    exception = QtCore.pyqtSignal(Exception, str)
 
     # In order to improve application performance and decrease the
     # number of spurious database operations, we batch updates
@@ -102,9 +103,10 @@ class DBWorker(QtCore.QObject):
                 for k,v in queued['batches'].iteritems():
                     batches[k] = v + batches.get(k, 0)
             db.commit()
-        except:
+        except Exception, e:
             db.rollback()
-            raise
+            self.exception.emit(e, traceback.format_exc())
+            return
 
         for k, v in batches.iteritems():
             if self.batches.has_key(k):
@@ -140,7 +142,10 @@ class DBWorker(QtCore.QObject):
     def bind(self, table, key, proxy):
         binding = {'proxy': weakref.ref(proxy)}
         self.get_binds(table, key).append(binding)
-        self.fetch(table, key, binding)
+        try:
+            self.fetch(table, key, binding)
+        except Exception, e:
+            self.exception.emit(e, traceback.format_exc())
 
     @QtCore.pyqtSlot(int, BatchProxy)
     def register_batch(self, key, proxy):
@@ -303,9 +308,6 @@ class DBManager(QtCore.QObject):
     sig_register_class = QtCore.pyqtSignal(dict)
     sig_signal_existing_created = QtCore.pyqtSignal(str)
 
-    created = QtCore.pyqtSignal(str, dict)
-    updated = QtCore.pyqtSignal(str, dict)
-
     def __init__(self):
         super(QtCore.QObject, self).__init__()
 
@@ -319,8 +321,9 @@ class DBManager(QtCore.QObject):
         self.sig_register_batch.connect(self.dbworker.register_batch)
         self.sig_register_class.connect(self.dbworker.register_class)
         self.sig_signal_existing_created.connect(self.dbworker.signal_existing_created)
-        self.dbworker.updated.connect(self.updated)
-        self.dbworker.created.connect(self.created)
+        self.updated = self.dbworker.updated
+        self.created = self.dbworker.created
+        self.exception = self.dbworker.exception
         self.dbworker.pending.connect(self.handle_pending)
         self.worker.started.connect(self.dbworker.setup)
         self.worker.please_exit.connect(self.dbworker.exit)

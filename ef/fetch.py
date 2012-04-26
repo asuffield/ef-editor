@@ -8,6 +8,12 @@ from ef.login import LoginTask, LoginError
 from ef.nettask import NetFuncs
 from ef.task import Task, TaskList
 
+class FetchError(Exception):
+    def __init__(self, msg):
+        self.msg = msg
+    def __str__(self):
+        return self.msg
+
 class PersonDBParser(EFDelegateParser):
     def __init__(self, progress, batch):
         EFDelegateParser.__init__(self)
