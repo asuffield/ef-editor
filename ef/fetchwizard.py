@@ -21,6 +21,10 @@ class FetchWizard(QtGui.QWizard, Ui_LoadPeopleWizard):
         self.accepted.connect(self.handle_accepted)
         self.currentIdChanged.connect(self.handle_changed)
 
+        self.page(0).registerField('username', self.ef_username)
+        self.page(0).registerField('password*', self.ef_password)
+        self.page(1).registerField('report*', self.fetch_people_report, 'currentText', self.fetch_people_report.currentIndexChanged)
+
     @QtCore.pyqtSlot(list)
     def reports_ready(self, reports_list):
         self.fetch_people_report.clear()
