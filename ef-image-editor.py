@@ -343,8 +343,9 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         self.person_model_proxy.setSortRole(QtCore.Qt.UserRole+1)
         self.person_model_proxy.sort(0)
 
-        self.person_list.setModel(self.person_model_proxy)
-        self.person_model.itemChanged.connect(self.handle_model_item_changed)
+        self.person_model_proxy.rowsInserted.connect(self.handle_filter_count)
+        self.person_model_proxy.rowsRemoved.connect(self.handle_filter_count)
+        self.person_model_proxy.modelReset.connect(self.handle_filter_count)
 
         self.filter_opinion.currentIndexChanged[str].connect(self.person_model_proxy.set_opinion)
         self.filter_event.currentIndexChanged[int].connect(self.handle_filter_event_changed)
@@ -371,10 +372,10 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
 
         dbmanager.created.connect(self.handle_db_created)
         dbmanager.exception.connect(self.handle_db_exception)
+        dbmanager.existing_done.connect(self.handle_db_existing_done)
         Person.signal_existing_created()
         Event.signal_existing_created()
 
-        self.person_list.selectionModel().currentChanged.connect(self.handle_select)
         self.output_updated.connect(self.handle_crop)
         self.wheel_event.connect(self.crop_frame.handle_wheel)
         self.opinion_ok.clicked.connect(self.handle_opinion_ok)
@@ -945,6 +946,13 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         print >>sys.stderr, msg
         QtGui.QMessageBox.information(self, "Error while accessing database", msg)
 
+    def handle_db_existing_done(self, table):
+        if table == 'person':
+            # Hook up the signals that we didn't want to fire while the database was loading (too many pointless repetitions)
+            self.person_list.setModel(self.person_model_proxy)
+            self.person_list.selectionModel().currentChanged.connect(self.handle_select)
+            self.person_model.itemChanged.connect(self.handle_model_item_changed)
+
     def handle_filter_event_changed(self, index):
         id = self.filter_event.itemData(index).toPyObject()
         self.person_model_proxy.set_event_id(id)
@@ -1020,12 +1028,15 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         self.action_importphoto.setEnabled(True)
 
     def handle_categories(self):
-        for category in self.findcategories.result():
+        for category in sorted(self.findcategories.result()):
             self.filter_category.addItem(category)
 
     def handle_policestatus(self):
-        for status in self.findpolicestatus.result():
+        for status in sorted(self.findpolicestatus.result()):
             self.filter_police.addItem(status)
+
+    def handle_filter_count(self):
+        self.filter_match_count.setText(str(self.person_model_proxy.rowCount()))
 
 def setup():
     datadir = QtGui.QDesktopServices.storageLocation(QtGui.QDesktopServices.DataLocation)

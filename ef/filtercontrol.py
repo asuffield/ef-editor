@@ -95,7 +95,11 @@ class FilterProxyModel(QtGui.QSortFilterProxyModel):
             sidx = self.index(0, 0, QtCore.QModelIndex())
             if self.mapToSource(sidx).column() != -1:
                 self.startup_hack = False
-                self.invalidate()
+                self.startup_hack_timer = QtCore.QTimer(self)
+                self.startup_hack_timer.setInterval(0)
+                self.startup_hack_timer.setSingleShot(True)
+                self.startup_hack_timer.timeout.connect(self.invalidate)
+                self.startup_hack_timer.start()
 
         db_loaded = model.data(index, QtCore.Qt.UserRole+8).toPyObject()
         if not db_loaded:
@@ -120,7 +124,7 @@ class FilterProxyModel(QtGui.QSortFilterProxyModel):
 
         if self.police_status != 'any':
             police_status = model.data(index, QtCore.Qt.UserRole+3).toString()
-            if police_status is not none and police_status != self.police_status:
+            if police_status is not None and police_status != self.police_status:
                 return False
 
         if self.category != 'any' or self.event_id:

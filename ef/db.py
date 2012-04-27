@@ -36,6 +36,7 @@ class DBWorker(QtCore.QObject):
     updated = QtCore.pyqtSignal(str, dict, str)
     pending = QtCore.pyqtSignal(int)
     exception = QtCore.pyqtSignal(Exception, str)
+    existing_done = QtCore.pyqtSignal(str)
 
     # In order to improve application performance and decrease the
     # number of spurious database operations, we batch updates
@@ -203,6 +204,8 @@ class DBWorker(QtCore.QObject):
             self.created.emit(table, key, 'signal_existing')
         query.finish()
 
+        self.existing_done.emit(table)
+
     def extract_key(self, table, values):
         key_fields = self.key_fields(table)
         try:
@@ -324,6 +327,7 @@ class DBManager(QtCore.QObject):
         self.updated = self.dbworker.updated
         self.created = self.dbworker.created
         self.exception = self.dbworker.exception
+        self.existing_done = self.dbworker.existing_done
         self.dbworker.pending.connect(self.handle_pending)
         self.worker.started.connect(self.dbworker.setup)
         self.worker.please_exit.connect(self.dbworker.exit)

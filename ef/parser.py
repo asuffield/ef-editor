@@ -42,6 +42,8 @@ class EFParser(HTMLParser):
         if tag == 'tr':
             if self.current_target is not None:
                 self.handle_record(self.current_target)
+            else:
+                print self.keys
             self.current_target = None
         elif tag == 'td':
             if self.current_inserter is not None:
@@ -77,7 +79,11 @@ class EFDelegateParser(EFParser):
         if record['Person ID'] == '':
             return
 
-        person_id = record['Person ID'] = int(record['Person ID'])
+        try:
+            person_id = record['Person ID'] = int(record['Person ID'])
+        except ValueError:
+            print "Confusing nonsense in person record", record
+            return
 
         if self.people.has_key(person_id):
             person = self.people[person_id]

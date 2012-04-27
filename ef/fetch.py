@@ -87,7 +87,6 @@ class ReportTask(Task, NetFuncs):
 
         yield self.wait(self.batch)
 
-    @catcherror
     def report_get_data(self):
         self.parser.feed(self.report_op.result())
 
