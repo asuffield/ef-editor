@@ -2,12 +2,11 @@ from __future__ import division
 import re
 from PyQt4 import QtCore
 from ef.lib import SignalGroup
-from ef.db import Person, Photo, Registration, Batch, FetchedPhoto, FindPhotos
+from ef.db import Person, Photo, Registration, Batch, FetchedPhoto
 import traceback
 from ef.nettask import NetFuncs
 from ef.task import Task
 from ef.login import LoginTask, LoginError
-from ef.threads import thread_registry
 from ef.image import PhotoImage
 from PIL import Image
 from StringIO import StringIO
@@ -24,14 +23,13 @@ class UploadTask(Task, NetFuncs):
     completed = QtCore.pyqtSignal(bool)
     error = QtCore.pyqtSignal(str)
 
-    def __init__(self, id, minimum_change, batch):
+    def __init__(self, person, minimum_change, batch):
         Task.__init__(self)
         NetFuncs.__init__(self)
 
-        self.id = id
         self.batch = batch
-        self.person = Person(id)
-        self.person.updated.connect(self.person_updated)
+        self.person = person
+        self.photo = Photo.get(id=self.person.current_photo_id)
         self.reply = None
         self.minimum_change = minimum_change
         self.skipped = False
@@ -39,26 +37,10 @@ class UploadTask(Task, NetFuncs):
         self.task_finished.connect(self.complete)
         self.task_exception.connect(self.handle_exception)
 
-    def complete(self):
-        self.completed.emit(not self.skipped)
-
-    def handle_exception(self, e, msg):
-        self.error.emit(msg)
-
-    def person_updated(self, origin):
-        if origin != 'bind':
-            return
+    def start(self):
         if self.person.current_photo_id is None:
             self.error.emit('Person %s has no current photo' % self.person)
             return
-        self.photo = Photo(self.person.current_photo_id)
-        self.photo.updated.connect(self.photo_updated)
-
-    def photo_updated(self, origin):
-        if origin != 'bind':
-            return
-
-        # Got what we need from the database
 
         # Read in the image
 
@@ -96,6 +78,12 @@ class UploadTask(Task, NetFuncs):
         # Start the process of uploading the edited image to eventsforce
         self.start_task(image)
 
+    def complete(self):
+        self.completed.emit(not self.skipped)
+
+    def handle_exception(self, e, msg):
+        self.error.emit(msg)
+
     def extract_link_from_silly_button(self, button):
         m = re.match(r'document.location=\'(.*)\';', button['onclick'])
         if not m:
@@ -124,7 +112,7 @@ class UploadTask(Task, NetFuncs):
                 }
 
     def task(self, image):
-        soup = yield self.get('https://www.eventsforce.net/libdems/backend/home/codEditMain.csp?codReadOnly=1&personID=%d&curPage=1' % self.id)
+        soup = yield self.get('https://www.eventsforce.net/libdems/backend/home/codEditMain.csp?codReadOnly=1&personID=%d&curPage=1' % self.person.id)
 
         links = soup.find_all('a', href=re.compile(r'^\.\./\.\./frontend/reg/initSession'))
         if not len(links):
@@ -213,8 +201,7 @@ class UploadTask(Task, NetFuncs):
         if self.photo.opinion == 'ok':
             new_opinion = 'ok'
 
-        self.fetchedphoto = FetchedPhoto(self.id, new_photo_url, self.batch, opinion=new_opinion)
-        self.fetchedphoto.run()
+        self.fetchedphoto = FetchedPhoto(self.person, new_photo_url, self.batch, opinion=new_opinion)
 
 class UploadWorker(QtCore.QObject):
     completed = QtCore.pyqtSignal()
@@ -229,9 +216,9 @@ class UploadWorker(QtCore.QObject):
 
     @QtCore.pyqtSlot(dict, str, str)
     @catcherror
-    def start_upload(self, ids, username, password):
+    def start_upload(self, people_filter, username, password):
         self.aborted = False
-        self.ids = ids
+        self.people_filter = people_filter
         self.i = 0
         self.upload_count = 0
         self.tasks = {}
@@ -240,35 +227,22 @@ class UploadWorker(QtCore.QObject):
         self.username = username
         self.password = password
         self.percent_filter = 0
+
+        if self.people_filter['mode'] == 'good' or self.people_filter['mode'] == 'percent':
+            self.people = None
+            if self.people_filter['mode'] == 'percent':
+                self.percent_filter = self.people_filter['filter']
+
+            self.people = People.all_with_photos('good')
+        else:
+            self.people = self.people_filter['people']
+
         self.login_task = LoginTask(self.username, self.password)
         self.login_task.task_exception.connect(self.handle_login_exception)
         self.login_task.start_task()
-
-        signals = [self.login_task.task_finished]
-
-        if self.ids['mode'] == 'good' or self.ids['mode'] == 'percent':
-            self.people = None
-            if self.ids['mode'] == 'percent':
-                self.percent_filter = self.ids['filter']
-
-            self.find_photos = FindPhotos('good')
-            signals.append(self.find_photos.results)
-        else:
-            self.people = self.ids['people']
-            self.find_photos = None
-
-        self.ready_group = SignalGroup(*signals)
-        self.ready_group.fire.connect(self.ready)
-
-        if self.find_photos is not None:
-            self.find_photos.run()
+        self.login_task.task_finished.connect(self.next_task)
 
         self.progress.emit('Logging in', 0, 0)
-
-    def ready(self):
-        if self.people is None:
-            self.people = self.find_photos.result()
-        self.next_task()
 
     def next_task(self):
         self.progress.emit('Uploading photos', self.i, len(self.people))
@@ -278,10 +252,14 @@ class UploadWorker(QtCore.QObject):
             self.batch.finish()
             return
 
-        id = self.people[self.i]
-        self.tasks[id] = UploadTask(id, self.percent_filter, self.batch)
-        self.tasks[id].completed.connect(self.handle_task_complete)
-        self.tasks[id].error.connect(self.handle_error)
+        try:
+            person = self.people[self.i]
+            self.tasks[person.id] = UploadTask(person, self.percent_filter, self.batch)
+            self.tasks[person.id].completed.connect(self.handle_task_complete)
+            self.tasks[person.id].error.connect(self.handle_error)
+            self.tasks[person.id].start()
+        except Exception:
+            self.error.emit(traceback.format_exc())
 
     def handle_task_complete(self, uploaded):
         if uploaded:
@@ -323,5 +301,5 @@ class Uploader(QtCore.QObject):
         self.error = self.uploader.error
         self.progress = self.uploader.progress
         
-    def start_upload(self, ids, username, password):
-        self.sig_start_upload.emit(ids, username, password)
+    def start_upload(self, people_filter, username, password):
+        self.sig_start_upload.emit(people_filter, username, password)

@@ -1,9 +1,8 @@
 from PyQt4 import QtCore
-from ef.db import Person, Photo, Event, Registration, FindPhotos, Batch, FetchedPhoto
+from ef.db import Person, Photo, Event, Registration, Batch, FetchedPhoto
 from ef.parser import EFDelegateParser
 import traceback
 import time
-from ef.threads import thread_registry
 from ef.login import LoginTask, LoginError
 from ef.nettask import NetFuncs
 from ef.task import Task, TaskList
@@ -103,24 +102,18 @@ class PhotosTask(Task, NetFuncs):
         self.batch = batch
 
     def task(self):
-        find_photos = FindPhotos(self.which)
-        find_photos.run()
-        self.progress.emit('Finding photos', 0, 0)
-        yield self.wait(find_photos)
-        
+        people = Person.all_with_photos(self.which)
+
         self.db_tasks = []
 
-        people = find_photos.result()
-
-        for i, person_id in enumerate(people):
+        for i, person in enumerate(people):
             self.progress.emit('Finding photos', i, len(people))
-            soup = yield self.get('https://www.eventsforce.net/libdems/backend/home/codEditMain.csp?codReadOnly=1&personID=%d&curPage=1' % person_id)
+            soup = yield self.get('https://www.eventsforce.net/libdems/backend/home/codEditMain.csp?codReadOnly=1&personID=%d&curPage=1' % person.id)
             img = soup.find('img', title='Picture Profile')
             if img is not None:
                 url = str(self.current.resolve_url(img['src']).toString())
-                fetched = FetchedPhoto(person_id, url, self.batch)
+                fetched = FetchedPhoto(person, url, self.batch)
                 self.db_tasks.append(fetched)
-                fetched.run()
 
         self.batch.finish()
         self.batch.progress.connect(self.handle_commit_progress)

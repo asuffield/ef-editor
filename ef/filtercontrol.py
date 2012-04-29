@@ -18,8 +18,6 @@ class FilterProxyModel(QtGui.QSortFilterProxyModel):
         self.event_id = None
         self.category = 'any'
 
-        self.startup_hack = True
-
     def set_opinion(self, opinion):
         self.opinion = opinion
         self.invalidateFilter()
@@ -88,30 +86,6 @@ class FilterProxyModel(QtGui.QSortFilterProxyModel):
         if self.id is not None:
             id, ok = model.data(index, QtCore.Qt.UserRole).toInt()
             return self.id == id
-
-        # Hack, until I have the patience to figure out what's going
-        # on here. The filter has an invalid mapToSource mapping for
-        # quite a long time before it starts working, and the sort
-        # order will be wrong before that point. Obviously a Qt
-        # bug. This bit of logic detects when the mapping starts
-        # working, and invalidates the whole filter so things will be
-        # recalcualted properly.        
-        if self.startup_hack:
-            sidx = self.index(0, 0, QtCore.QModelIndex())
-            if self.mapToSource(sidx).column() != -1:
-                self.startup_hack = False
-                self.startup_hack_timer = QtCore.QTimer(self)
-                self.startup_hack_timer.setInterval(0)
-                self.startup_hack_timer.setSingleShot(True)
-                self.startup_hack_timer.timeout.connect(self.invalidate)
-                self.startup_hack_timer.start()
-
-        db_loaded = model.data(index, QtCore.Qt.UserRole+8).toPyObject()
-        if not db_loaded:
-            # Filter out things which are still loading for the first
-            # time (but not things which have changed and are being
-            # reloaded, because that messes up selections)
-            return False
 
         if self.name:
             name = model.data(index, QtCore.Qt.DisplayRole).toPyObject()

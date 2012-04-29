@@ -3,7 +3,6 @@ from PyQt4 import QtCore, QtNetwork
 import os
 import re
 from types import StringType, UnicodeType
-from ef.threads import WorkerThread
 
 STRING_TYPES = StringType, UnicodeType
 

@@ -1,7 +1,6 @@
 from PyQt4 import QtCore, QtGui
 from ef.nettask import NetFuncs
 from ef.task import Task
-from ef.threads import thread_registry
 from ef.db import Photo
 from collections import OrderedDict
 import os

@@ -104,7 +104,8 @@ class QNetworkReplyOp(TaskOp):
 class HTMLOp(QNetworkReplyOp):
     def result(self):
         data = super(HTMLOp, self).result()
-        return BeautifulSoup(data, 'lxml')
+        soup = BeautifulSoup(data, 'lxml')
+        return soup
 
 class NetFuncs(object):
     def __init__(self):

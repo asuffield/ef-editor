@@ -1,7 +1,6 @@
 from PyQt4 import QtCore
 import time
 import re
-from ef.threads import thread_registry
 from ef.login import LoginTask, LoginError
 from ef.nettask import NetFuncs
 from ef.task import Task, TaskList

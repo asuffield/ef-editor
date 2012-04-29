@@ -9,17 +9,17 @@ import traceback
 import time
 import tempfile
 import shutil
+import multiprocessing
 from PyQt4 import QtCore, QtGui
 from ef.ui.editor import Ui_ImageEdit
 from ef.ui.upload_wizard import Ui_UploadPeopleWizard
-from ef.db import Person, Photo, setup_session, FindRegistrations, FindCategories, FindPoliceStatus, Event, FetchPhotoHistory, Batch, FetchedPhoto, dbmanager, stash_photo
+from ef.db import Person, Photo, setup_session, Registration, Event, Batch, FetchedPhoto, stash_photo
 from ef.photocache import ThumbnailCache, PhotoImageCache
 from ef.photodownload import PhotoDownloader
 from ef.fetch import Fetcher
 from ef.fetchreports import ReportsFetcher
 from ef.fetchwizard import FetchWizard
 from ef.upload import Uploader
-from ef.threads import thread_registry
 from ef.netlib import start_network_manager
 from ef.filtercontrol import FilterProxyModel
 from collections import deque
@@ -27,26 +27,23 @@ from datetime import datetime
 from PIL import Image
 
 class ImageListItem(QtGui.QStandardItem):
-    def __init__(self, downloader, photo_cache, person_id, db_loaded_cb):
+    def __init__(self, downloader, photo_cache, person):
         QtGui.QStandardItem.__init__(self)
 
-        self.person = Person(person_id)
+        self.person = person
         self.person.updated.connect(self.person_updated)
         self.photo = None
         self.photo_cache = photo_cache
         self.downloader = downloader
         self.photo_load_retries = 0
         self.loading = False
-        self.db_loaded_cb = db_loaded_cb
-        self.is_db_loaded = False
-        self.registrations = []
-        self.findregistrations = FindRegistrations(person_id)
-        self.findregistrations.finished.connect(self.registrations_updated)
-        self.findregistrations.run()
+        self.registrations = Registration.by_person(person.id)
 
         self.size_hint = QtCore.QSize(80, 160)
 
         self.setFlags(QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsSelectable)
+
+        self.person_updated(set(['init']))
 
     def data(self, role):
         if role == QtCore.Qt.DecorationRole:
@@ -96,13 +93,10 @@ class ImageListItem(QtGui.QStandardItem):
                 return None
             return self.photo.id
 
-        if role == QtCore.Qt.UserRole+8:
-            return self.is_db_loaded
-
         return None
 
     def person_updated(self, origin):
-        if origin == 'CropFrame':
+        if not origin - set(['CropFrame']):
             return
         if self.person.current_photo_id is None:
             return
@@ -110,18 +104,15 @@ class ImageListItem(QtGui.QStandardItem):
             return
         if self.photo is not None:
             self.photo.updated.disconnect(self.photo_updated)
-        self.photo = Photo(self.person.current_photo_id)
+        self.photo = Photo.get(id=self.person.current_photo_id)
         self.photo.updated.connect(self.photo_updated)
         self.photo_load_retries = 0
-        self.emitDataChanged()
+        self.photo_updated(set(['init']))
 
     def photo_updated(self, origin):
-        if origin == 'CropFrame':
+        if not origin - set(['CropFrame']):
             return
         self.loading = False
-        if not self.is_db_loaded and self.db_loaded_cb is not None:
-            self.db_loaded_cb()
-        self.is_db_loaded = True
         self.photo_load_retries = 0
         # Populate the disk cache in the background, but don't load into the application just yet
         self.downloader.download_photo(self.photo.id, self.photo.url, self.photo.full_path(), background=True)
@@ -291,7 +282,7 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
     output_updated = QtCore.pyqtSignal()
     wheel_event = QtCore.pyqtSignal(int)
 
-    def __init__(self, parent=None):
+    def __init__(self, dbmanager, parent=None):
         super(QtGui.QWidget, self).__init__(parent)
         self.setupUi(self)
 
@@ -358,28 +349,21 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         self.filter_by_size.stateChanged.connect(self.person_model_proxy.set_only_bad_sizes)
         self.filter_only_missing.stateChanged.connect(self.person_model_proxy.set_only_missing)
 
-        self.findcategories = FindCategories()
-        self.findcategories.finished.connect(self.handle_categories)
-        self.findcategories.run()
-
-        self.findpolicestatus = FindPoliceStatus()
-        self.findpolicestatus.finished.connect(self.handle_policestatus)
-        self.findpolicestatus.run()
-
         self.history_model = QtGui.QStandardItemModel(self)
         self.history_model.setColumnCount(1)
 
         self.history_list.setModel(self.history_model)
         self.history_items = {}
-        self.fetchphotohistory = FetchPhotoHistory()
-        self.fetchphotohistory.ready.connect(self.handle_photohistory)
         self.history_make_current.clicked.connect(self.handle_historymakecurrent)
 
+        self.dbmanager = dbmanager
         dbmanager.created.connect(self.handle_db_created)
         dbmanager.exception.connect(self.handle_db_exception)
         dbmanager.existing_done.connect(self.handle_db_existing_done)
-        Person.signal_existing_created()
+        Photo.signal_existing_created()
+        Registration.signal_existing_created()
         Event.signal_existing_created()
+        Person.signal_existing_created()
 
         self.output_updated.connect(self.handle_crop)
         self.wheel_event.connect(self.crop_frame.handle_wheel)
@@ -644,14 +628,7 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         else:
             self.person_name.setText(unicode(self.current_person))
 
-        self.fetchphotohistory.run(p.id)
-
-    def handle_photohistory(self, person_id):
-        if not self.current_person or self.current_person.id != person_id:
-            return
-        photos = self.fetchphotohistory.get_photos(person_id)
-        if photos is None:
-            return
+        photos = Photo.by_person(self.current_person.id)
         self.history_model.clear()
         self.history_items = {}
         for photo in sorted(photos, key=lambda photo: photo.date_fetched, reverse=True):
@@ -907,7 +884,7 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         self.upload_wizard.restart()
         
         if self.upload_wizard.upload_photos_thisone.isChecked() and self.current_person is not None:
-            upload_photos = {'mode': 'list', 'people': [self.current_person.id]}
+            upload_photos = {'mode': 'list', 'people': [self.current_person]}
         elif self.upload_wizard.upload_photos_bysize.isChecked():
             upload_photos = {'mode': 'percent', 'filter': int(self.upload_wizard.upload_photos_minsize.text())}
         elif self.upload_wizard.upload_photos_all.isChecked():
@@ -935,16 +912,12 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         self.status_start(text, max)
         self.progress.setValue(cur)
 
-    def handle_db_created(self, table, key):
-        if table == 'person':
-            # This abstraction is very leaky - can't preserve type information through ef.db
-            id, ok = key['id'].toInt()
-            item = self.image_list_items[id] = ImageListItem(self.photodownloader, self.list_photo_cache, id, lambda: self.person_model.appendRow(item))
-        elif table == 'event':
-            id, ok = key['id'].toInt()
-            event = self.events[id] = Event(id)
-            handler = self.event_load_handlers[id] = lambda: self.filter_event.addItem(event.name, id)
-            self.events[id].updated.connect(handler)
+    def handle_db_created(self, obj):
+        if isinstance(obj, Person):
+            item = self.image_list_items[obj.id] = ImageListItem(self.photodownloader, self.list_photo_cache, obj)
+            self.person_model.appendRow(item)
+        elif isinstance(obj, Event):
+            self.filter_event.addItem(obj.name, obj.id)
 
     def handle_db_exception(self, e, msg):
         print >>sys.stderr, msg
@@ -957,6 +930,12 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
             self.person_list.setModel(self.person_model_proxy)
             self.person_list.selectionModel().currentChanged.connect(self.handle_select)
             self.person_model.itemChanged.connect(self.handle_model_item_changed)
+
+            for status in sorted(Person.statuses):
+                self.filter_police.addItem(status)
+        elif table == 'registration':
+            for category in sorted(Registration.categories):
+                self.filter_category.addItem(category)
 
     def handle_filter_event_changed(self, index):
         id = self.filter_event.itemData(index).toPyObject()
@@ -1032,14 +1011,6 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
     def handle_import_finished(self):
         self.action_importphoto.setEnabled(True)
 
-    def handle_categories(self):
-        for category in sorted(self.findcategories.result()):
-            self.filter_category.addItem(category)
-
-    def handle_policestatus(self):
-        for status in sorted(self.findpolicestatus.result()):
-            self.filter_police.addItem(status)
-
     def handle_filter_count(self):
         self.filter_match_count.setText(str(self.person_model_proxy.rowCount()))
 
@@ -1048,18 +1019,19 @@ def setup():
     dir = QtCore.QDir()
     if not dir.exists(datadir):
         dir.mkpath(datadir)
-    setup_session(unicode(datadir))
+    dbmanager = setup_session(unicode(datadir))
     start_network_manager()
+    return dbmanager
 
 if __name__ == "__main__":
+    multiprocessing.freeze_support()
     QtCore.QCoreApplication.setOrganizationName('asuffield.me.uk')
     QtCore.QCoreApplication.setOrganizationDomain('asuffield.me.uk')
     QtCore.QCoreApplication.setApplicationName('ef-image-editor')
     app = QtGui.QApplication(sys.argv)
-    setup()
-    myapp = ImageEdit()
+    dbmanager = setup()
+    myapp = ImageEdit(dbmanager)
     myapp.show()
     rc = app.exec_()
-    thread_registry.shutdown(0)
-    thread_registry.wait_all()
+    dbmanager.shutdown()
     sys.exit(rc)
