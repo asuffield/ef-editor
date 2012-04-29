@@ -12,6 +12,7 @@ class FilterProxyModel(QtGui.QSortFilterProxyModel):
         self.name = ''
         self.id = None
         self.only_bad_sizes = False
+        self.only_missing = False
         self.opinion = 'unsure'
         self.police_status = 'any'
         self.event_id = None
@@ -33,6 +34,10 @@ class FilterProxyModel(QtGui.QSortFilterProxyModel):
 
     def set_only_bad_sizes(self, state):
         self.only_bad_sizes = state
+        self.invalidateFilter()
+
+    def set_only_missing(self, state):
+        self.only_missing = state
         self.invalidateFilter()
 
     def set_category(self, category):
@@ -112,6 +117,13 @@ class FilterProxyModel(QtGui.QSortFilterProxyModel):
             name = model.data(index, QtCore.Qt.DisplayRole).toPyObject()
             if name is not None and unicode(self.name).lower() not in unicode(name).lower():
                 return False
+
+        if self.only_missing:
+            size = model.data(index, QtCore.Qt.UserRole+5).toPyObject()
+            if size is not None:
+                x,y = size
+                if x > 0 and y > 0:
+                    return False
 
         if self.only_bad_sizes:
             if self.is_size_ok(index):

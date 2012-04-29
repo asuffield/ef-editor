@@ -170,7 +170,7 @@ class Fetcher(QtCore.QObject):
         super(QtCore.QObject, self).__init__()
         
         self.fetcher = FetchWorker()
-        self.fetcher.moveToThread(thread_registry.get('network'))
+        #self.fetcher.moveToThread(thread_registry.get('network'))
 
         self.sig_start_fetch.connect(self.fetcher.start_fetch)
 

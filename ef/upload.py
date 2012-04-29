@@ -315,7 +315,7 @@ class Uploader(QtCore.QObject):
         super(QtCore.QObject, self).__init__()
         
         self.uploader = UploadWorker()
-        self.uploader.moveToThread(thread_registry.get('network'))
+        #self.uploader.moveToThread(thread_registry.get('network'))
 
         self.sig_start_upload.connect(self.uploader.start_upload)
 

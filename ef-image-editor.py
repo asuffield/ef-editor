@@ -2,6 +2,7 @@
 
 from __future__ import division
 
+import gc
 import sys
 import os
 import traceback
@@ -26,7 +27,7 @@ from datetime import datetime
 from PIL import Image
 
 class ImageListItem(QtGui.QStandardItem):
-    def __init__(self, downloader, photo_cache, person_id):
+    def __init__(self, downloader, photo_cache, person_id, db_loaded_cb):
         QtGui.QStandardItem.__init__(self)
 
         self.person = Person(person_id)
@@ -36,7 +37,8 @@ class ImageListItem(QtGui.QStandardItem):
         self.downloader = downloader
         self.photo_load_retries = 0
         self.loading = False
-        self.db_loaded = False
+        self.db_loaded_cb = db_loaded_cb
+        self.is_db_loaded = False
         self.registrations = []
         self.findregistrations = FindRegistrations(person_id)
         self.findregistrations.finished.connect(self.registrations_updated)
@@ -95,7 +97,7 @@ class ImageListItem(QtGui.QStandardItem):
             return self.photo.id
 
         if role == QtCore.Qt.UserRole+8:
-            return self.db_loaded
+            return self.is_db_loaded
 
         return None
 
@@ -117,7 +119,9 @@ class ImageListItem(QtGui.QStandardItem):
         if origin == 'CropFrame':
             return
         self.loading = False
-        self.db_loaded = True
+        if not self.is_db_loaded and self.db_loaded_cb is not None:
+            self.db_loaded_cb()
+        self.is_db_loaded = True
         self.photo_load_retries = 0
         # Populate the disk cache in the background, but don't load into the application just yet
         self.downloader.download_photo(self.photo.id, self.photo.url, self.photo.full_path(), background=True)
@@ -352,6 +356,7 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         self.filter_category.currentIndexChanged[str].connect(self.person_model_proxy.set_category)
         self.filter_police.currentIndexChanged[str].connect(self.person_model_proxy.set_police_status)
         self.filter_by_size.stateChanged.connect(self.person_model_proxy.set_only_bad_sizes)
+        self.filter_only_missing.stateChanged.connect(self.person_model_proxy.set_only_missing)
 
         self.findcategories = FindCategories()
         self.findcategories.finished.connect(self.handle_categories)
@@ -530,7 +535,7 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
             f(item)
 
     def handle_search(self):
-        query = str(self.search_for.text()).strip()
+        query = unicode(self.search_for.text()).strip()
 
         # If the search box is empty, we want to show all items
         if len(query) == 0:
@@ -629,7 +634,7 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
             self.info_photo_filename.setText(self.current_photo.url_filename())
             self.info_photo_fetched_at.setText(time.ctime(self.current_photo.date_fetched))
             self.person_name.setText(u'Loading %s...' % p)
-            self.upload_wizard.upload_photos_thisname.setText(str(p))
+            self.upload_wizard.upload_photos_thisname.setText(unicode(p))
 
             self.main_photo_cache.load_image(photo.id, photo.full_path(), photo.url,
                                              ready_cb=self.handle_photo_ready,
@@ -934,8 +939,7 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         if table == 'person':
             # This abstraction is very leaky - can't preserve type information through ef.db
             id, ok = key['id'].toInt()
-            item = self.image_list_items[id] = ImageListItem(self.photodownloader, self.list_photo_cache, id)
-            self.person_model.appendRow(item)
+            item = self.image_list_items[id] = ImageListItem(self.photodownloader, self.list_photo_cache, id, lambda: self.person_model.appendRow(item))
         elif table == 'event':
             id, ok = key['id'].toInt()
             event = self.events[id] = Event(id)
@@ -948,6 +952,7 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
 
     def handle_db_existing_done(self, table):
         if table == 'person':
+            print "Finished generating people"
             # Hook up the signals that we didn't want to fire while the database was loading (too many pointless repetitions)
             self.person_list.setModel(self.person_model_proxy)
             self.person_list.selectionModel().currentChanged.connect(self.handle_select)
@@ -1043,9 +1048,9 @@ def setup():
     dir = QtCore.QDir()
     if not dir.exists(datadir):
         dir.mkpath(datadir)
-    setup_session(str(datadir))
+    setup_session(unicode(datadir))
     start_network_manager()
- 
+
 if __name__ == "__main__":
     QtCore.QCoreApplication.setOrganizationName('asuffield.me.uk')
     QtCore.QCoreApplication.setOrganizationDomain('asuffield.me.uk')

@@ -9,6 +9,8 @@ Detect errors when login details wrong
  - or other badness in eventsforce interactions?
  - when errors occur during photo uploading that we know are "just retry, EF sucks", retry them
 
+Suppress exception popups when one is already on screen
+
 High priority features
 ----------------------
 use pyinstaller instead of py2exe

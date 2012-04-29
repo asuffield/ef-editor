@@ -125,7 +125,7 @@ class PhotoDownloader(QtCore.QObject):
         super(QtCore.QObject, self).__init__()
         
         self.downloader = PhotoDownloadWorker()
-        self.downloader.moveToThread(thread_registry.get('network'))
+        #self.downloader.moveToThread(thread_registry.get('network'))
 
         self.sig_download_photo.connect(self.downloader.download_photo)
 

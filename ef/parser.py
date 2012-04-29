@@ -42,8 +42,8 @@ class EFParser(HTMLParser):
         if tag == 'tr':
             if self.current_target is not None:
                 self.handle_record(self.current_target)
-            else:
-                print self.keys
+            #else:
+            #    print self.keys
             self.current_target = None
         elif tag == 'td':
             if self.current_inserter is not None:

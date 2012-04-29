@@ -3,6 +3,7 @@ import weakref
 import time
 import traceback
 import shutil
+import sys
 from PyQt4 import QtCore, QtSql
 from ef.threads import WorkerThread
 from collections import deque, OrderedDict
@@ -30,6 +31,14 @@ class DBException(Exception):
     def __str__(self):
         return "%s: %s" % (self.msg, self.error)
 
+class DebugQSqlQuery(QtSql.QSqlQuery):
+    def __init__(self, *args, **kwargs):
+        print >>sys.stderr, 'Creating query', self
+        QtSql.QSqlQuery.__init__(self, *args, **kwargs)
+    def __del__(self):
+        print >>sys.stderr, 'Deleting query', self
+        pass
+
 class DBWorker(QtCore.QObject):
     # XXX: Should map types rather than using QVariant in the dicts here
     created = QtCore.pyqtSignal(str, dict, str)
@@ -53,6 +62,7 @@ class DBWorker(QtCore.QObject):
         self.tables = {}
         self.write_cache = OrderedDict()
         self.insert_queue = deque()
+        self.query = None
 
     @QtCore.pyqtSlot(dict)
     def register_class(self, rec):
@@ -66,6 +76,9 @@ class DBWorker(QtCore.QObject):
 
     @QtCore.pyqtSlot()
     def setup(self):
+        self.db = QtSql.QSqlDatabase.database()
+        self.query = QtSql.QSqlQuery()
+        self.query.setForwardOnly(True)
         self.ticker = QtCore.QTimer(self)
         self.ticker.setInterval(300)
         self.ticker.timeout.connect(self.timeout)
@@ -85,7 +98,7 @@ class DBWorker(QtCore.QObject):
 
         # Do all updates/inserts in batched transactions for (much) better performance
         batches = {}
-        db = QtSql.QSqlDatabase.database()
+        db = self.db
         db.transaction()
         try:
             while self.insert_queue and not timer.hasExpired(timeout):
@@ -169,13 +182,14 @@ class DBWorker(QtCore.QObject):
 
     def fetch(self, table, key, binding):
         field_names = self.value_fields(table)
-        
-        query = QtSql.QSqlQuery()
+
+        query = self.query
+        #print >>sys.stderr, 'prepare fetch', query
         if not query.prepare('select %s from %s where %s' % (','.join(field_names), table, self.key_expr(table))):
             raise DBException("Prepare failed", query)
         for k in self.key_fields(table):
             query.bindValue(':%s' % k, key[k])
-        query.setForwardOnly(True)
+        #query.setForwardOnly(True)
         if not query.exec_():
             raise DBException("Query failed?", query)
 
@@ -194,7 +208,8 @@ class DBWorker(QtCore.QObject):
     def signal_existing_created(self, table):
         key_fields = self.key_fields(table)
 
-        query = QtSql.QSqlQuery()
+        query = self.query
+        #print 'prepare signal'
         if not query.prepare('select %s from %s' % (','.join(key_fields), table)):
             raise DBException('Prepare failed', query)
         query.exec_()
@@ -236,11 +251,12 @@ class DBWorker(QtCore.QObject):
     def do_update(self, table, values, origin):
         value_fields = set(values) - set(self.key_fields(table))
 
-        query = QtSql.QSqlQuery()
+        query = self.query
+        #print 'prepare update'
         query.prepare('update %s set %s where %s' % (table, ','.join(map(lambda k: "%s = :%s" % (k,k), value_fields)), self.key_expr(table)))
         for k, v in values.iteritems():
             query.bindValue(':%s' % k, v)
-        query.setForwardOnly(True)
+        #query.setForwardOnly(True)
         if not query.exec_():
             raise DBException("Query failed!?", query)
         query.finish()
@@ -266,13 +282,14 @@ class DBWorker(QtCore.QObject):
                 self.do_insert(table, values, origin)
                 return
 
-        query = QtSql.QSqlQuery()
+        query = self.query
+        #print 'prepare upsert'
         stmt = 'select %s from %s where %s' % (','.join(key_fields), table, self.key_expr(table))
         if not query.prepare(stmt):
             raise DBException("Prepare failed!", query)
         for k in key_fields:
             query.bindValue(':%s' % k, values[k])
-        query.setForwardOnly(True)
+        #query.setForwardOnly(True)
         if not query.exec_():
             raise DBException("Query failed!", query)
         if query.next():
@@ -284,18 +301,21 @@ class DBWorker(QtCore.QObject):
     def do_insert(self, table, values, origin):
         key_fields = self.key_fields(table)
 
-        query = QtSql.QSqlQuery()
+        query = self.query
         keys = values.keys()
+        #print 'prepare insert'
         if not query.prepare('insert into %s (%s) values (%s)' % (table, ','.join(keys), ','.join(map(lambda k: ':' + k, keys)))):
             raise DBException("Prepare failed!", query)
         for k, v in values.iteritems():
             query.bindValue(':%s' % k, v)
-        query.setForwardOnly(True)
+        #query.setForwardOnly(True)
         if not query.exec_():
             raise DBException("Query failed?!", query)
         query.finish()
 
-        query = QtSql.QSqlQuery('select %s from %s where rowid = last_insert_rowid()' % (','.join(key_fields), table))
+        if not query.prepare('select %s from %s where rowid = last_insert_rowid()' % (','.join(key_fields), table)):
+            raise DBException("Prepare failed!", query)
+
         if not query.next():
             raise DBException("Failed to find row just inserted?!", query)
 
@@ -673,6 +693,7 @@ class QueryWorker(QtCore.QObject):
     def run(self):
         try:
             query = QtSql.QSqlQuery()
+            #print 'prepare query'
             if not query.prepare(self.query_str):
                 raise DBException("Prepare failed", query)
             for k, v in self.binds.iteritems():
@@ -854,6 +875,7 @@ class FetchedPhotoWorker(QtCore.QObject):
 
     def find_photo(self):
         query = QtSql.QSqlQuery()
+        #print 'prepare fetched'
         if self.url is not None:
             query.prepare('select id from photo where person_id = :person_id and url = :url')
             query.bindValue(':url', self.url)

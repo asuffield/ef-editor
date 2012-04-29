@@ -131,12 +131,13 @@ class ManagerWorker(QtCore.QObject):
 def start_network_manager():
     # It requires a silly dance to create an object in a suitable QThread...
     global manager_worker
-    network_thread = WorkerThread(name='network')
+    #network_thread = WorkerThread(name='network')
     manager_worker = ManagerWorker()
-    manager_worker.moveToThread(network_thread)
-    network_thread.started.connect(manager_worker.start)
-    network_thread.please_exit.connect(network_thread.exit)
-    network_thread.start()
+    #manager_worker.moveToThread(network_thread)
+    #network_thread.started.connect(manager_worker.start)
+    #network_thread.please_exit.connect(network_thread.exit)
+    #network_thread.start()
+    manager_worker.start()
 
 def qt_form_post(url, fields, file=None):
     request = QtNetwork.QNetworkRequest(QtCore.QUrl(url))
