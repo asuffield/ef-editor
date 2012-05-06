@@ -44,9 +44,9 @@ class PhotoDownloadWorker(QtCore.QObject):
         self.queue = {'urgent': None, 'normal': OrderedDict(), 'background': OrderedDict()}
         self.current_task = None
 
-    @QtCore.pyqtSlot(int, str, str, bool, bool, bool)
-    def download_photo(self, id, url, filename, refresh, urgent, background):
-        if not refresh and os.path.exists(filename):
+    @QtCore.pyqtSlot(int, dict, bool, bool, bool)
+    def download_photo(self, id, location, refresh, urgent, background):
+        if not refresh and os.path.exists(location['filename']):
             self.ready.emit(id)
             return
 
@@ -58,7 +58,7 @@ class PhotoDownloadWorker(QtCore.QObject):
             return
 
         queue = self.queue['background' if background else 'normal']
-        queue[id] = {'id': id, 'url': url, 'filename': filename}
+        queue[id] = {'id': id, 'url': location['url'], 'filename': location['filename']}
         if urgent:
             self.queue['urgent'] = id
 
@@ -119,7 +119,7 @@ class PhotoDownloadWorker(QtCore.QObject):
         self.start_task()
 
 class PhotoDownloader(QtCore.QObject):
-    sig_download_photo = QtCore.pyqtSignal(int, str, str, bool, bool, bool)
+    sig_download_photo = QtCore.pyqtSignal(int, dict, bool, bool, bool)
 
     def __init__(self):
         super(QtCore.QObject, self).__init__()
@@ -137,7 +137,7 @@ class PhotoDownloader(QtCore.QObject):
         self.latest_queue_size = None
         
     def download_photo(self, id, url, filename, refresh=False, urgent=False, background=False):
-        self.sig_download_photo.emit(id, url, filename, refresh, urgent, background)
+        self.sig_download_photo.emit(id, {'url': url, 'filename': filename}, refresh, urgent, background)
 
     def update_queue_size(self, size):
         self.latest_queue_size = size

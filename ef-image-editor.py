@@ -615,7 +615,8 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
 
         if photo is not None and photo.full_path() is not None:
             self.current_photo = photo
-            self.info_photo_filename.setText(self.current_photo.url_filename())
+            filename = self.current_photo.local_filename()
+            self.info_photo_filename.setText(filename if filename else '')
             self.info_photo_fetched_at.setText(time.ctime(self.current_photo.date_fetched))
             self.person_name.setText(u'Loading %s...' % p)
             self.upload_wizard.upload_photos_thisname.setText(unicode(p))
@@ -1003,8 +1004,7 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         local_filename = stash_photo(filename)
 
         self.import_batch = Batch()
-        self.import_fetchedphoto = FetchedPhoto(self.current_person.id, None, self.import_batch, local_filename=local_filename)
-        self.import_fetchedphoto.run()
+        self.import_fetchedphoto = FetchedPhoto(self.current_person, None, self.import_batch, local_filename=local_filename)
         self.import_batch.finished.connect(self.handle_import_finished)
         self.import_batch.finish()
 

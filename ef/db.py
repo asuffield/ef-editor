@@ -369,11 +369,16 @@ class Photo(DBBase):
     def url_filename(self):
         if self.url is not None:
             return self.url.split('/')[-1]
+        return None
 
-    def full_path(self):
+    def local_filename(self):
         filename = self.url_filename()
         if not filename:
             filename = self.filename
+        return filename
+
+    def full_path(self):
+        filename = self.local_filename()
         if filename:
             return os.path.join(photodir, filename)
 
