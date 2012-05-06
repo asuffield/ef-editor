@@ -990,6 +990,7 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         self.action_importphoto.setEnabled(False)
 
         if not self.openimage.exec_():
+            self.action_importphoto.setEnabled(True)
             return
 
         QtCore.QSettings().setValue('openimage-state', self.openimage.saveState())
