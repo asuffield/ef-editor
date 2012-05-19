@@ -9,6 +9,7 @@ import traceback
 import time
 import tempfile
 import shutil
+import csv
 import multiprocessing
 from PyQt4 import QtCore, QtGui
 from ef.ui.editor import Ui_ImageEdit
@@ -92,6 +93,9 @@ class ImageListItem(QtGui.QStandardItem):
             if self.photo is None:
                 return None
             return self.photo.id
+
+        if role == QtCore.Qt.UserRole+10:
+            return (self.person, self.photo)
 
         return None
 
@@ -349,6 +353,9 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         self.filter_by_size.stateChanged.connect(self.person_model_proxy.set_only_bad_sizes)
         self.filter_only_missing.stateChanged.connect(self.person_model_proxy.set_only_missing)
 
+        self.filters_reset.clicked.connect(self.handle_reset_filters)
+        self.export_people.clicked.connect(self.handle_export_people)
+
         self.history_model = QtGui.QStandardItemModel(self)
         self.history_model.setColumnCount(1)
 
@@ -423,6 +430,13 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         if os.name == 'nt':
             self.chooseeditor.setNameFilter('*.exe')
         self.chooseeditor.restoreState(self.settings.value('chooseeditor-state', '').toByteArray())
+
+        self.savereport = QtGui.QFileDialog(self, 'Save report')
+        self.savereport.setFileMode(QtGui.QFileDialog.AnyFile)
+        self.savereport.setAcceptMode(QtGui.QFileDialog.AcceptSave)
+        self.savereport.setNameFilter('*.csv')
+        self.savereport.setDefaultSuffix('csv')
+        self.savereport.restoreState(self.settings.value('savereport-state', '').toByteArray())
 
         self.image_editor = self.settings.value('image-editor', '').toString()
 
@@ -926,7 +940,7 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
 
     def handle_db_existing_done(self, table):
         if table == 'person':
-            print "Finished generating people"
+            #print "Finished generating people"
             # Hook up the signals that we didn't want to fire while the database was loading (too many pointless repetitions)
             self.person_list.setModel(self.person_model_proxy)
             self.person_list.selectionModel().currentChanged.connect(self.handle_select)
@@ -1014,6 +1028,44 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
 
     def handle_filter_count(self):
         self.filter_match_count.setText(str(self.person_model_proxy.rowCount()))
+
+    def handle_reset_filters(self):
+        self.person_model_proxy.id = None
+        self.person_model_proxy.name = ''
+        self.filter_opinion.setCurrentIndex(3)
+        self.filter_category.setCurrentIndex(0)
+        self.filter_police.setCurrentIndex(0)
+        self.filter_by_size.setChecked(False)
+        self.filter_only_missing.setChecked(False)
+
+        self.search_for.setText('')
+
+    def handle_export_people(self):
+        if not self.savereport.exec_():
+            return
+
+        QtCore.QSettings().setValue('openimage-state', self.openimage.saveState())
+
+        filenames = self.savereport.selectedFiles()
+        filename = str(filenames[0])
+
+        f = open(filename, 'wb')
+        writer = csv.writer(f)
+
+        writer.writerow(['Person ID', 'Salutation', 'Firstname', 'Lastname', 'Police status', 'Photo opinion'])
+
+        for i in xrange(0, self.person_model_proxy.rowCount()):
+            index = self.person_model_proxy.index(i, 0)
+            person, photo = self.person_model_proxy.data(index, QtCore.Qt.UserRole+10).toPyObject()
+            row = [unicode(person.id), person.title, person.firstname, person.lastname, person.police_status]
+            row = [x.encode('utf-8') for x in row]
+            if photo is not None:
+                row.append(photo.opinion)
+            else:
+                row.append('missing')
+            writer.writerow(row)
+        
+        f.close()
 
 def setup():
     datadir = QtGui.QDesktopServices.storageLocation(QtGui.QDesktopServices.DataLocation)

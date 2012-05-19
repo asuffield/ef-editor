@@ -1,0 +1,72 @@
+Key features to be aware of:
+
+The 'people' tab shows everybody that matches the current selections
+in the 'filters' tab. This can be further reduced with the 'search'
+box at the bottom, which will match either a person ID (if it's a
+number) or a part of the displayed name (if it's anything other than a
+number).
+
+Filters are mostly obvious, but some things to keep in mind:
+
+ - the people selected are those which match all of the selected criteria
+
+ - "photos with poor sizes" are anything that isn't very close to the
+   right shape (and hence will want centering) or has such low
+   resolution that the quality is probably unacceptable
+
+ - blank "police status" means the person has no accreditation data in
+   eventsforce - that usually means they've only been to events where
+   there was no accreditation
+
+ - if opinion is set to "unsure" (the default) then people will
+   disappear from the 'people' list when you change their opinion, and
+   the next person on the list will be selected. This makes it quicker
+   to work through batches of people, and you can use the back/forwards
+   buttons on the right to revisit one if you clicked the wrong button.
+
+The 'history' tab shows older versions of the photo that have been
+downloaded by this application and are still available. New entries
+will appear here if you upload a photo that you've changed, or if you
+fetch the person and they've uploaded a new photo, or if you import a
+photo. The 'make current' button at the bottom allows you to select
+older photos, which you can then edit and upload again.
+
+The 'actions' menu has a few items on it worth noting:
+
+ - 'Reload this photo' will download the currently displayed photo
+ from eventsforce again. This is just in case of corrupted/interrupted
+ downloads (due to lost internet connection, etc). Normally you won't
+ need it.
+
+ - 'Import photo' will let you attach an image to a person, even if
+ their photo is currently missing, and upload it to eventsforce. This
+ should make it easier to deal with people who submit photos by post.
+
+ - 'Edit image' will create a temporary copy of the photo and open it
+ in your selected image editor, for ones which are too badly messed up
+ for the built-in editing tools to suffice. You'll have to find the
+ image editor's executable (try looking in "C:\Program Files"), and
+ use 'Import photo' to get it back in when you're done. I'm not
+ expecting this to get much use, because any photo that bad is
+ probably unusuable, but it's there for emergencies.
+
+ - 'Open in eventsforce' will instruct your web browser to open the
+ person's record on the eventsforce website. If you aren't currently
+ logged into eventsforce, you'll get sent to the login page instead,
+ and then you'll have to go back and select 'open in eventsforce'
+ again - a little awkward, but if you're logged in already then it's
+ easier than trying to search for the person.
+
+The 'edit' tab currently has three functions:
+
+ - brightness washes the whole image evenly towards white or black
+
+ - conntrast makes the difference between white and black larger or
+   smaller, which can sometimes correct for bad lighting colours
+
+ - gamma makes dark regions lighter or shadows darker, which can often
+   correct for images that were taken with too little lighting.
+
+If an image looks too dim, a good general approach is to nudge up
+gamma until all the features are clear, then increase contrast a
+little to make the colours less washed out.
