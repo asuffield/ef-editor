@@ -1015,6 +1015,7 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
             Image.open(filename).verify()
         except Exception, e:
             QtGui.QMessageBox.information(self, "Error loading image", str(e))
+            return
 
         local_filename = stash_photo(filename)
 

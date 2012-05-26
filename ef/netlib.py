@@ -118,25 +118,14 @@ def encode_form_fields(fields):
     return urlencode(dict([(k,unicode(v).encode('utf-8')) for k,v in fields.items()]))
 
 manager = None
-manager_worker = None
-
-class ManagerWorker(QtCore.QObject):
-    @QtCore.pyqtSlot()
-    def start(self):
-        global manager
-        manager = QtNetwork.QNetworkAccessManager()
-        #manager.setProxy(QtNetwork.QNetworkProxy(QtNetwork.QNetworkProxy.HttpProxy, '127.0.0.1', 8080))
 
 def start_network_manager():
-    # It requires a silly dance to create an object in a suitable QThread...
-    global manager_worker
-    #network_thread = WorkerThread(name='network')
-    manager_worker = ManagerWorker()
-    #manager_worker.moveToThread(network_thread)
-    #network_thread.started.connect(manager_worker.start)
-    #network_thread.please_exit.connect(network_thread.exit)
-    #network_thread.start()
-    manager_worker.start()
+    global manager
+    manager = QtNetwork.QNetworkAccessManager()
+
+def stop_network_manager():
+    global manager
+    manager = None
 
 def qt_form_post(url, fields, file=None):
     request = QtNetwork.QNetworkRequest(QtCore.QUrl(url))
