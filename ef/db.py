@@ -175,6 +175,7 @@ class DBManager(QtCore.QObject):
     created = QtCore.pyqtSignal(DBBase, set)
     exception = QtCore.pyqtSignal(Exception, str)
     existing_done = QtCore.pyqtSignal(str)
+    process_done = QtCore.pyqtSignal(str, str)
 
     def __init__(self, datadir):
         super(QtCore.QObject, self).__init__()
@@ -244,6 +245,8 @@ class DBManager(QtCore.QObject):
                     self.existing_done.emit(result)
                 elif op == 'update':
                     dbdata.update(result['table'], result['key'], result['values'], result['origin'])
+                elif op == 'import' or op == 'export':
+                    self.process_done(op, result)
                 else:
                     print 'Unexpected op from dbworker', op
         except Queue.Empty:
@@ -262,6 +265,12 @@ class DBManager(QtCore.QObject):
 
     def signal_existing_created(self, table):
         self.post('fetch_all', table)
+
+    def export(self, filename):
+        self.post('export', filename)
+
+    def import(self, filename):
+        self.post('import', filename)
 
 class Batch(QtCore.QObject, Finishable):
     finished = QtCore.pyqtSignal()

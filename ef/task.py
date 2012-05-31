@@ -38,6 +38,9 @@ class TaskOp(QtCore.QObject):
     def result(self):
         return None
 
+    def emit_delayed(self):
+        pass
+
 class Finishable(object):
     def __init__(self, signal, error_signal=None):
         self.finish_signal = signal
@@ -66,14 +69,16 @@ class FinishableWaitOp(TaskOp):
     def __init__(self, finishable):
         TaskOp.__init__(self)
         self.finishable = finishable
+        if not self.finishable.is_finished:
+            self.finishable.finish_signal.connect(self.finish)
+            if self.finishable.error_signal is not None:
+                self.finishable.error_signal.connect(self.throw)
+
+    def emit_delayed(self):
         if self.finishable.finished_error is not None:
             self.throw(*self.finishable.finished_error)
         elif self.finishable.is_finished:
             self.finish()
-        else:
-            self.finishable.finish_signal.connect(self.finish)
-            if self.finishable.error_signal is not None:
-                self.finishable.error_signal.connect(self.throw)
 
 class Task(QtCore.QObject, Finishable):
     task_finished = QtCore.pyqtSignal()
@@ -133,6 +138,10 @@ class Task(QtCore.QObject, Finishable):
                 raise TypeError("yield from task must be an instance of TaskOp - double fault")
 
             self.connect_coro()
+            # We have this mainly for FinishedWaitOp, which might have
+            # finished immediately but needs to send its signals after
+            # we connect to them
+            self.current.emit_delayed()
         except StopIteration:
             self.task_finished.emit()
         except Exception, e:

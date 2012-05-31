@@ -1336,6 +1336,9 @@
     <addaction name="action_importphoto"/>
     <addaction name="action_editimage"/>
     <addaction name="action_openeventsforce"/>
+    <addaction name="separator"/>
+    <addaction name="action_export"/>
+    <addaction name="action_import"/>
    </widget>
    <widget class="QMenu" name="menuPreferences">
     <property name="title">
@@ -1384,6 +1387,22 @@
   <action name="action_chooseeditor">
    <property name="text">
     <string>Choose image editor...</string>
+   </property>
+  </action>
+  <action name="action_export">
+   <property name="enabled">
+    <bool>false</bool>
+   </property>
+   <property name="text">
+    <string>Export database</string>
+   </property>
+  </action>
+  <action name="action_import">
+   <property name="enabled">
+    <bool>false</bool>
+   </property>
+   <property name="text">
+    <string>Import database</string>
    </property>
   </action>
  </widget>

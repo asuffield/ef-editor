@@ -1,8 +1,5 @@
 High priority bugs
 ------------------
-Photos with apostrophe in the url
- - sent to emma for EF bug report
-
 Error logging
 
 Detect errors when login details wrong

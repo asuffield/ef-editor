@@ -1,8 +1,9 @@
 from HTMLParser import HTMLParser
 import sys
+import re
 
 person_fields = set(['Person ID', 'Firstname', 'Lastname', 'Full Name', 'Salutation', 'username',
-                     'Profile Picture',
+                     'Profile Picture', 'Membership No', 'Voting Rights',
                      'EF_Application Status', 'common first name'])
 event_fields = set(['Bookers Firstname', 'Bookers lastname', 'Booking Ref', 'Type of Attendee'])
 
@@ -60,6 +61,7 @@ class EFParser(HTMLParser):
 class EFDelegateParser(EFParser):
     people = {}
     events_map = {}
+    registrations = {}
     
     def get_event(self, record):
         try:
@@ -92,6 +94,12 @@ class EFDelegateParser(EFParser):
             for key in person_fields:
                 if key in record:
                     person[key] = record.pop(key)
+            # Record changes size here, so must not be an iterator...
+            for key in record.keys():
+                if re.match(r'^Local Party', key):
+                    if record[key].strip() != '':
+                        person['Local Party'] = record[key]
+                    del record[key]
             self.handle_person(person)
 
         event_id = self.get_event(record)
@@ -100,9 +108,11 @@ class EFDelegateParser(EFParser):
         events = person['events']
         event = events[event_id] = {}
         for key in event_fields:
-            event[key] = record[key]
+            if record.has_key(key):
+                event[key] = record[key]
 
         self.handle_registration(person, event_id)
+        self.registrations.setdefault(person_id, []).append(event_id)
 
     def handle_person(self, person):
         pass

@@ -48,6 +48,10 @@ class DBWorker(object):
                 self.update(*args)
             elif op == 'upsert':
                 self.upsert(*args)
+            elif op == 'import':
+                self.import(args)
+            elif op == 'export':
+                self.export(args)
         except Exception:
             self.post_exception()
 
@@ -209,6 +213,34 @@ class DBWorker(object):
             values = dict(row.items())
             key = self.extract_key(table_name, values)
             self.post('insert', {'table': table_name, 'key': key, 'values': values, 'origin': origin})
+
+    def import(self, filename):
+        try:
+            f = open(filename)
+            data = yaml.load(f)
+            self.process_import(data)
+        except Exception:
+            msg = traceback.format_exc()
+            self.post('import', msg)
+        else:
+            self.post('import', 'Imported OK')
+
+    def export(self, filename):
+        try:
+            f = open(filename, 'w')
+            data = self.prepare_export()
+            f.write(yaml.dump(data))
+        except Exception:
+            msg = traceback.format_exc()
+            self.post('export', msg)
+        else:
+            self.post('export', 'Exported OK')
+
+    def process_import(self, data):
+        pass
+
+    def prepare_export(self, data):
+        return {}
 
 def setup_session(datadir):
     dbfile = os.path.join(datadir, 'database.sqlite')

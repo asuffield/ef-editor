@@ -367,6 +367,7 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         dbmanager.created.connect(self.handle_db_created)
         dbmanager.exception.connect(self.handle_db_exception)
         dbmanager.existing_done.connect(self.handle_db_existing_done)
+        dbmanager.process_done.connect(self.handle_db_process_done)
         Photo.signal_existing_created()
         Registration.signal_existing_created()
         Event.signal_existing_created()
@@ -439,6 +440,21 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         self.savereport.restoreState(self.settings.value('savereport-state', '').toByteArray())
 
         self.image_editor = self.settings.value('image-editor', '').toString()
+
+        self.action_export.triggered.connect(self.handle_export)
+        self.action_import.triggered.connect(self.handle_import)
+
+        self.saveexport = QtGui.QFileDialog(self, 'Export database')
+        self.saveexport.setFileMode(QtGui.QFileDialog.AnyFile)
+        self.saveexport.setAcceptMode(QtGui.QFileDialog.AcceptSave)
+        self.saveexport.setNameFilter('*.yaml')
+        self.saveexport.setDefaultSuffix('yaml')
+        self.saveexport.restoreState(self.settings.value('saveexport-state', '').toByteArray())
+
+        self.openimport = QtGui.QFileDialog(self, 'Import image')
+        self.openimport.setFileMode(QtGui.QFileDialog.ExistingFile)
+        self.openimport.setNameFilter('*.yaml')
+        self.openimport.restoreState(self.settings.value('openimport-state', '').toByteArray())
 
         self.status_expiry_timer = QtCore.QTimer(self)
         self.status_expiry_timer.setInterval(5000)
@@ -1067,6 +1083,27 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
             writer.writerow(row)
         
         f.close()
+
+    def handle_export(self):
+        if not self.saveexport.exec_():
+            return
+
+        QtCore.QSettings().setValue('saveexport-state', self.saveexport.saveState())
+
+        filenames = self.saveexport.selectedFiles()
+        filename = str(filenames[0])
+
+    def handle_import(self):
+        if not self.openimport.exec_():
+            return
+
+        QtCore.QSettings().setValue('openimport-state', self.openimport.saveState())
+
+        filenames = self.openimport.selectedFiles()
+        filename = str(filenames[0])
+
+    def handle_db_process_done(self, process, msg):
+        QtGui.QMessageBox.information(self, "Finished %s" % process, msg)
 
 def setup():
     datadir = QtGui.QDesktopServices.storageLocation(QtGui.QDesktopServices.DataLocation)
