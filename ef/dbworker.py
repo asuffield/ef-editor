@@ -49,9 +49,9 @@ class DBWorker(object):
             elif op == 'upsert':
                 self.upsert(*args)
             elif op == 'import':
-                self.import(args)
+                self.import_data(args)
             elif op == 'export':
-                self.export(args)
+                self.export_data(args)
         except Exception:
             self.post_exception()
 
@@ -214,7 +214,7 @@ class DBWorker(object):
             key = self.extract_key(table_name, values)
             self.post('insert', {'table': table_name, 'key': key, 'values': values, 'origin': origin})
 
-    def import(self, filename):
+    def import_data(self, filename):
         try:
             f = open(filename)
             data = yaml.load(f)
@@ -225,7 +225,7 @@ class DBWorker(object):
         else:
             self.post('import', 'Imported OK')
 
-    def export(self, filename):
+    def export_data(self, filename):
         try:
             f = open(filename, 'w')
             data = self.prepare_export()

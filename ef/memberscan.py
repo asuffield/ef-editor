@@ -42,7 +42,7 @@ class MemberParser(EFDelegateParser):
                 person_voting = voting_bool_map.get(str(person['Voting Rights']).lower(), False)
                 if rec_voting != person_voting:
                     errs.append('Discrepency in voting rights')
-            if rec.get('lp', None) is not None and rec['lp'].strip() != person['Local Party'].strip():
+            if rec.get('lp', None) is not None and rec['lp'].strip() != person.get('Local Party', '').strip():
                 errs.append('Local party does not match membership number')
             if len(errs):
                 self.wrong.append({'person': person, 'member': rec, 'msg': errs})

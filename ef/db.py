@@ -266,10 +266,10 @@ class DBManager(QtCore.QObject):
     def signal_existing_created(self, table):
         self.post('fetch_all', table)
 
-    def export(self, filename):
+    def export_data(self, filename):
         self.post('export', filename)
 
-    def import(self, filename):
+    def import_data(self, filename):
         self.post('import', filename)
 
 class Batch(QtCore.QObject, Finishable):
