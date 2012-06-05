@@ -1061,7 +1061,7 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         if not self.savereport.exec_():
             return
 
-        QtCore.QSettings().setValue('openimage-state', self.openimage.saveState())
+        QtCore.QSettings().setValue('savereport-state', self.savereport.saveState())
 
         filenames = self.savereport.selectedFiles()
         filename = str(filenames[0])

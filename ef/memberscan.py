@@ -31,19 +31,19 @@ class MemberParser(EFDelegateParser):
         self.unreg.discard(member)
         if member not in self.members:
             if self.have_nv or voting_bool_map.get(str(person['Voting Rights']).lower()):
-                self.wrong.append({'person': person, 'member': None, 'msg': ['Person is not in membership list']})
+                self.wrong.append({'person': person, 'member': None, 'msg': [('notmember', 'Person is not in membership list')]})
         else:
             rec = self.members[member]
             errs = []
             if rec.get('surname', None) is not None and rec['surname'].strip() != person['Lastname'].strip():
-                errs.append('Surname does not match membership number')
+                errs.append(('personaldata', 'Surname does not match membership number'))
             if rec.get('voting', None) is not None:
                 rec_voting = voting_bool_map.get(str(rec['voting']).lower(), False)
                 person_voting = voting_bool_map.get(str(person['Voting Rights']).lower(), False)
                 if rec_voting != person_voting:
-                    errs.append('Discrepency in voting rights')
+                    errs.append(('voting', 'Discrepency in voting rights'))
             if rec.get('lp', None) is not None and rec['lp'].strip() != person.get('Local Party', '').strip():
-                errs.append('Local party does not match membership number')
+                errs.append(('personaldata', 'Local party does not match membership number'))
             if len(errs):
                 self.wrong.append({'person': person, 'member': rec, 'msg': errs})
 

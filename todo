@@ -8,6 +8,8 @@ Detect errors when login details wrong
 
 Suppress exception popups when one is already on screen
 
+Lock database so only one can be open
+
 High priority features
 ----------------------
 use pyinstaller instead of py2exe

@@ -3,7 +3,7 @@
 from __future__ import division
 
 import sys
-
+import csv
 from PyQt4 import QtCore, QtGui
 from datetime import datetime
 
@@ -52,6 +52,18 @@ class VotingSelectDelegate(ColumnSelectDelegate):
         for col in memberfile.header:
             editor.addItem(col)
 
+def make_results_model(view, want_error_column=False):
+    model = QtGui.QStandardItemModel(0, 3 if want_error_column else 2)
+    model.setHeaderData(0, QtCore.Qt.Horizontal, 'Member#')
+    model.setHeaderData(1, QtCore.Qt.Horizontal, 'Person')
+    if want_error_column:
+        model.setHeaderData(2, QtCore.Qt.Horizontal, 'Error')
+    view.setModel(model)
+    view.sortByColumn(2 if want_error_column else 1, QtCore.Qt.AscendingOrder)
+    view.horizontalHeader().setResizeMode(QtGui.QHeaderView.ResizeToContents)
+    view.horizontalHeader().setVisible(True)
+    return model
+
 class MemberCheck(QtGui.QMainWindow, Ui_MemberCheck):
     def __init__(self, parent=None):
         super(QtGui.QWidget, self).__init__(parent)
@@ -63,8 +75,8 @@ class MemberCheck(QtGui.QMainWindow, Ui_MemberCheck):
 
         self.input_model = QtGui.QStandardItemModel(0, 5)
         self.input_model.setHeaderData(0, QtCore.Qt.Horizontal, 'Filename')
-        self.input_model.setHeaderData(1, QtCore.Qt.Horizontal, 'Surname')
-        self.input_model.setHeaderData(2, QtCore.Qt.Horizontal, 'Member#')
+        self.input_model.setHeaderData(1, QtCore.Qt.Horizontal, 'Member#')
+        self.input_model.setHeaderData(2, QtCore.Qt.Horizontal, 'Surname')
         self.input_model.setHeaderData(3, QtCore.Qt.Horizontal, 'Local party')
         self.input_model.setHeaderData(4, QtCore.Qt.Horizontal, 'Voting')
         self.input_files.setModel(self.input_model)
@@ -79,19 +91,37 @@ class MemberCheck(QtGui.QMainWindow, Ui_MemberCheck):
         self.input_files.horizontalHeader().setResizeMode(QtGui.QHeaderView.ResizeToContents)
         self.input_files.horizontalHeader().setResizeMode(0, QtGui.QHeaderView.Stretch)
 
-        self.results_model = QtGui.QStandardItemModel(0, 3)
-        self.results_model.setHeaderData(0, QtCore.Qt.Horizontal, 'Member#')
-        self.results_model.setHeaderData(1, QtCore.Qt.Horizontal, 'Person')
-        self.results_model.setHeaderData(2, QtCore.Qt.Horizontal, 'Error')
-        self.results.setModel(self.results_model)
-        self.results.sortByColumn(2, QtCore.Qt.AscendingOrder)
+        self.results_model = make_results_model(self.all_results, want_error_column=True)
+        self.notmember_model = make_results_model(self.notmember_results)
+        self.voting_model = make_results_model(self.voting_results)
+        self.personaldata_model = make_results_model(self.personaldata_results, want_error_column=True)
+        self.unregistered_model = make_results_model(self.unregistered_results)
 
-        self.results.horizontalHeader().setResizeMode(QtGui.QHeaderView.ResizeToContents)
+        self.models = {'all': self.results_model,
+                       'notmember': self.notmember_model,
+                       'personaldata': self.personaldata_model,
+                       'voting': self.voting_model,
+                       'unregistered': self.unregistered_model,
+                       }
+
+        self.views = {'all': self.all_results,
+                      'notmember': self.notmember_results,
+                      'voting': self.voting_results,
+                      'personaldata': self.personaldata_results,
+                      'unregistered': self.unregistered_results,
+                      }
 
         self.addfile = QtGui.QFileDialog(self, 'Load membership list')
         self.addfile.setFileMode(QtGui.QFileDialog.ExistingFile)
         self.addfile.setNameFilter('*.csv')
         self.addfile.restoreState(self.settings.value('addfile-state', '').toByteArray())
+
+        self.savereport = QtGui.QFileDialog(self, 'Save report')
+        self.savereport.setFileMode(QtGui.QFileDialog.AnyFile)
+        self.savereport.setAcceptMode(QtGui.QFileDialog.AcceptSave)
+        self.savereport.setNameFilter('*.csv')
+        self.savereport.setDefaultSuffix('csv')
+        self.savereport.restoreState(self.settings.value('savereport-state', '').toByteArray())        
 
         self.add_input.clicked.connect(self.handle_add)
         self.remove_input.clicked.connect(self.handle_remove)
@@ -167,21 +197,48 @@ class MemberCheck(QtGui.QMainWindow, Ui_MemberCheck):
 
     def handle_finished(self):
         self.task_ended()
+
+        for model in self.models.itervalues():
+            model.removeRows(0, model.rowCount())
+        
         for member in self.scanner.unregistered_members:
             rec = self.scanner.members[member]
             self.results_model.appendRow([QtGui.QStandardItem(rec['member']),
                                           QtGui.QStandardItem(rec['surname']),
                                           QtGui.QStandardItem('Unregistered voting rep'),
                                           ])
+            self.models['unregistered'].appendRow([QtGui.QStandardItem(rec['member']),
+                                                   QtGui.QStandardItem(rec['surname']),
+                                                   ])
 
         for err in self.scanner.wrong_status_members:
             person = err['person']
             msgs = err['msg']
+            name = '%s %s %s' % (person['Salutation'], person['Firstname'], person['Lastname'])
             self.results_model.appendRow([QtGui.QStandardItem(person['Membership No']),
-                                          QtGui.QStandardItem('%s %s %s' % (person['Salutation'], person['Firstname'], person['Lastname'])),
-                                          QtGui.QStandardItem('\n'.join(msgs)),
+                                          QtGui.QStandardItem(name),
+                                          QtGui.QStandardItem('\n'.join(map(lambda m: m[1], msgs))),
                                           ])
-        self.results.sortByColumn(2, QtCore.Qt.AscendingOrder)
+            sorted_msgs = {}
+            for kind, msg in msgs:
+                sorted_msgs.setdefault(kind, []).append(msg)
+
+            for kind, msgs in sorted_msgs.iteritems():
+                model = self.models[kind]
+                row = [QtGui.QStandardItem(person['Membership No']),
+                       QtGui.QStandardItem(name),
+                       ]
+                if model.columnCount() >= 3:
+                    row.append(QtGui.QStandardItem('\n'.join(msgs)))
+                model.appendRow(row)
+            
+        for view in self.views.itervalues():
+            if view.model().columnCount() == 2:
+                view.sortByColumn(1, QtCore.Qt.AscendingOrder)
+            else:
+                view.sortByColumn(2, QtCore.Qt.AscendingOrder)
+            view.resizeColumnToContents(0)
+            view.resizeColumnToContents(1)
 
     def handle_exception(self, e, msg, blob):
         print >>sys.stderr, msg
@@ -192,7 +249,33 @@ class MemberCheck(QtGui.QMainWindow, Ui_MemberCheck):
         self.progress.setText(msg)
 
     def handle_save(self):
-        pass
+        view = self.results_tabs.currentWidget().findChild(QtGui.QTableView)
+        model = view.model()
+        
+        if not self.savereport.exec_():
+            return
+
+        QtCore.QSettings().setValue('savereport-state', self.savereport.saveState())
+
+        filenames = self.savereport.selectedFiles()
+        filename = str(filenames[0])
+
+        f = open(filename, 'wb')
+        writer = csv.writer(f)
+
+        headers = ['Member#', 'Person']
+        if model.columnCount >= 3:
+            headers.append('Errors')
+        writer.writerow(headers)
+
+        for i in xrange(0, model.rowCount()):
+            row = []
+            for j in xrange(0, model.columnCount()):
+                index = model.index(i, j)
+                row.append(unicode(model.data(index).toString()).encode('utf-8'))
+            writer.writerow(row)
+        
+        f.close()
 
 if __name__ == "__main__":
     QtCore.QCoreApplication.setOrganizationName('asuffield.me.uk')
