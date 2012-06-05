@@ -18,7 +18,7 @@ def qt_relative_url(reply, url):
     return reply.url().resolved(relative_url)
 
 class QNetworkReplyOp(TaskOp):
-    def __init__(self, reply, timeout, redirecter=None):
+    def __init__(self, reply, timeout=None, redirecter=None):
         super(QNetworkReplyOp, self).__init__()
 
         self.reply = reply
@@ -102,9 +102,13 @@ class QNetworkReplyOp(TaskOp):
             self.redirected_to.abort()
 
 class HTMLOp(QNetworkReplyOp):
+    def __init__(self, *args, **kwargs):
+        self.parse_only = kwargs.pop('parse_only', None)
+        QNetworkReplyOp.__init__(self, *args, **kwargs)
+    
     def result(self):
         data = super(HTMLOp, self).result()
-        soup = BeautifulSoup(data, 'lxml')
+        soup = BeautifulSoup(data, 'lxml', parse_only=self.parse_only)
         return soup
 
 class NetFuncs(object):
@@ -117,17 +121,18 @@ class NetFuncs(object):
         self.latest_net_op = f(url, *args, **kwargs)
         return self.latest_net_op
 
-    def get(self, url, timeout=30):
-        return self._net_op(lambda url: HTMLOp(qt_page_get(url), timeout=timeout), url)
+    def get(self, url, **kwargs):
+        return self._net_op(lambda url: HTMLOp(qt_page_get(url), **kwargs), url)
 
     def get_raw(self, url, timeout=30):
         return self._net_op(lambda url: QNetworkReplyOp(qt_page_get(url), timeout=timeout), url)
 
     def post(self, url, *args, **kwargs):
         timeout = kwargs.pop('timeout', 30)
-        return self._net_op(lambda url, *args, **kwargs: HTMLOp(qt_form_post(url, *args, **kwargs), timeout=timeout), url, *args, **kwargs)
+        parse_only = kwargs.pop('parse_only', None)
+        return self._net_op(lambda url, *args, **kwargs: HTMLOp(qt_form_post(url, *args, **kwargs), timeout=timeout, parse_only=parse_only), url, *args, **kwargs)
 
-    def submit_form(self, form, user_fields={}, file=None, timeout=30):
+    def submit_form(self, form, user_fields={}, file=None, timeout=30, parse_only=None):
         fields = {}
         action = form['action']
 
@@ -145,4 +150,4 @@ class NetFuncs(object):
 
         fields.update(user_fields)
 
-        return self.post(action, fields, file, timeout=timeout)
+        return self.post(action, fields, file, timeout=timeout, parse_only=parse_only)

@@ -1,6 +1,7 @@
 from ef.nettask import NetFuncs
 from ef.task import Task
 from PyQt4 import QtCore
+from bs4 import SoupStrainer
 import re
 
 class LoginError(Exception):
@@ -21,8 +22,11 @@ class LoginTask(Task, NetFuncs):
         self.password = password
 
     def task(self):
-        soup = yield self.get('https://www.eventsforce.net/libdems/backend/home/login.csp')
-        soup = yield self.submit_form(soup.form, {'txtUsername': self.username, 'txtPassword': self.password})
+        soup = yield self.get('https://www.eventsforce.net/libdems/backend/home/login.csp', parse_only=SoupStrainer('form'))
+
+        login_strainer = SoupStrainer(['script', 'title', 'span'])
+        
+        soup = yield self.submit_form(soup.form, {'txtUsername': self.username, 'txtPassword': self.password}, parse_only=login_strainer)
 
         # Follow hideous javascript redirect that they snuck into the login sequence
         m = None
@@ -30,7 +34,7 @@ class LoginTask(Task, NetFuncs):
             m = re.search(r'var redirectURL="(.*)"', script.text)
             if m:
                 link = m.group(1)
-                soup = yield self.get(link)
+                soup = yield self.get(link, parse_only=login_strainer)
                 break
 
         if soup.find(text=re.compile('Invalid logon')) is not None:
