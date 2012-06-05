@@ -4,10 +4,21 @@ import sys
 import os
 import shutil
 import traceback
+import yaml
 from collections import deque, OrderedDict
 from sqlalchemy.engine import reflection
 from sqlalchemy.sql import select, update, insert
 import Queue
+try:
+    from yaml import CLoader as Loader, CDumper as Dumper
+except ImportError:
+    from yaml import Loader, Dumper
+
+class DBImportError(Exception):
+    def __init__(self, msg):
+        self.msg = msg
+    def __str__(self):
+        return self.msg
 
 class DBWorker(object):
     # In order to improve application performance and decrease the
@@ -69,19 +80,27 @@ class DBWorker(object):
             self.post_exception()
 
     def process_queues(self, timeout):
-        timer_end = time.time() + timeout
+        if timeout > 0:
+            timer_end = time.time() + timeout
+        else:
+            timer_end = None
+
+        def timed_out():
+            if timer_end is None:
+                return False
+            return time.time() >= timer_end
 
         # Do all updates/inserts in batched transactions for (much) better performance
         batches = {}
         trans = self.conn.begin()
         try:
-            while self.insert_queue and time.time() < timer_end:
+            while self.insert_queue and not timed_out():
                 queued = self.insert_queue.popleft()
                 self.do_insert(queued['table'], queued['values'], queued['origin'])
                 for k,v in queued['batches'].iteritems():
                     batches[k] = v + batches.get(k, 0)
                 
-            while self.write_cache and time.time() < timer_end:
+            while self.write_cache and not timed_out():
                 k, queued = self.write_cache.popitem(last=False)
                 table,key = k
                 if queued['upsert']:
@@ -217,10 +236,11 @@ class DBWorker(object):
     def import_data(self, filename):
         try:
             f = open(filename)
-            data = yaml.load(f)
+            data = yaml.load(f, Loader=Loader)
             self.process_import(data)
         except Exception:
             msg = traceback.format_exc()
+            print >>sys.stderr, msg
             self.post('import', msg)
         else:
             self.post('import', 'Imported OK')
@@ -229,18 +249,38 @@ class DBWorker(object):
         try:
             f = open(filename, 'w')
             data = self.prepare_export()
-            f.write(yaml.dump(data))
+            f.write(yaml.dump(data, Dumper=Dumper))
         except Exception:
             msg = traceback.format_exc()
+            print >>sys.stderr, msg
             self.post('export', msg)
         else:
             self.post('export', 'Exported OK')
 
     def process_import(self, data):
-        pass
+        if data.pop('$id', '') != 'ef-image-editor export':
+            raise DBImportError('This does not look like a valid database export')
 
-    def prepare_export(self, data):
-        return {}
+        for table_name in data:
+            for row in data[table_name]:
+                self.upsert(table_name, row, 'import', 0)
+
+        print "Processing queues..."
+        self.process_queues(-1)
+        print "Done importing"
+
+    def prepare_export(self):
+        data = {'$id': 'ef-image-editor export'}
+
+        for table_name in self.tables:
+            rows = data[table_name] = []
+            table = self.tables[table_name]
+            q = select([table])
+            result = self.conn.execute(q)
+            for row in iter(result.fetchone, None):
+                rows.append(dict(row.items()))
+
+        return data
 
 def setup_session(datadir):
     dbfile = os.path.join(datadir, 'database.sqlite')

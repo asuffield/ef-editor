@@ -1,7 +1,5 @@
 High priority bugs
 ------------------
-Error logging
-
 Detect errors when login details wrong
  - or other badness in eventsforce interactions?
  - when errors occur during photo uploading that we know are "just retry, EF sucks", retry them
@@ -13,8 +11,6 @@ Lock database so only one can be open
 High priority features
 ----------------------
 use pyinstaller instead of py2exe
-
-General feature to allow backup
 
 Fetch recent changes (needs to handle date arguments to report)
 
@@ -33,3 +29,6 @@ Fix abuses of super() by getting rid of them. super() is insane
 Purge habitual getters/setters
 
 Multiple simultaneous uploads, for speed? Downloads? Priority of those?
+
+Use a stacked "loading" widget to make it clear when long-running
+operations (initial load, export, import) are running.

@@ -178,8 +178,8 @@
               <rect>
                <x>0</x>
                <y>0</y>
-               <width>305</width>
-               <height>402</height>
+               <width>277</width>
+               <height>207</height>
               </rect>
              </property>
              <layout class="QFormLayout" name="formLayout_2">
@@ -758,8 +758,8 @@
                 <rect>
                  <x>0</x>
                  <y>0</y>
-                 <width>325</width>
-                 <height>444</height>
+                 <width>269</width>
+                 <height>337</height>
                 </rect>
                </property>
                <layout class="QVBoxLayout" name="verticalLayout_8">
@@ -1390,17 +1390,11 @@
    </property>
   </action>
   <action name="action_export">
-   <property name="enabled">
-    <bool>false</bool>
-   </property>
    <property name="text">
     <string>Export database</string>
    </property>
   </action>
   <action name="action_import">
-   <property name="enabled">
-    <bool>false</bool>
-   </property>
    <property name="text">
     <string>Import database</string>
    </property>

@@ -41,11 +41,12 @@ class DBDataManager(object):
     def all(self, cls):
         return self.objects.get(cls.__tablename__, [])
 
-    def update(self, table, key, values, origin):
+    def update(self, table, key, values, origin, suppress_updates=False):
         rec = self.classes[table]
         k = self.object_key(table, key)
         obj = self.objects[k]
-        obj._do_update(values, origin)
+        obj._do_update(values, origin, suppress_updates)
+        return obj
 
     def register_class(self, dbclass, name):
         rec = {'name': name,
@@ -101,7 +102,7 @@ class DBBase(QtCore.QObject):
     def __contains__(self, name):
         return name in self.__values__
 
-    def _do_update(self, data, origin):
+    def _do_update(self, data, origin, suppress_updates):
         for k,v in data.iteritems():
             try:
                 if isinstance(v, QtCore.QVariant):
@@ -109,7 +110,8 @@ class DBBase(QtCore.QObject):
                 self.__values__[k] = v
             except TypeError:
                 self.__values__[k] = None
-        self.updated.emit(origin)
+        if not suppress_updates:
+            self.updated.emit(origin)
 
     @classmethod
     def _check_values(self, values):
@@ -194,6 +196,10 @@ class DBManager(QtCore.QObject):
         self.batches = weakref.WeakValueDictionary()
         self.is_shutdown = False
 
+        self.is_importing = False
+        self.import_queue = []
+        self.import_updates = []
+
     def shutdown(self):
         if self.is_shutdown:
             return
@@ -240,13 +246,27 @@ class DBManager(QtCore.QObject):
                     self.pending_op_count = result
                 elif op == 'fetch' or op == 'insert':
                     obj = dbdata.create(result['table'], result['key'], result['values'])
-                    self.created.emit(obj, result.get('origin', set(['fetch'])))
+                    if self.is_importing:
+                        self.import_queue.append(obj)
+                    else:
+                        self.created.emit(obj, result.get('origin', set(['fetch'])))
                 elif op == 'fetch_all':
                     self.existing_done.emit(result)
                 elif op == 'update':
-                    dbdata.update(result['table'], result['key'], result['values'], result['origin'])
-                elif op == 'import' or op == 'export':
-                    self.process_done(op, result)
+                    obj = dbdata.update(result['table'], result['key'], result['values'], result['origin'], suppress_updates=self.is_importing)
+                    if self.is_importing:
+                        self.import_updates.append((obj, result['origin']))
+                elif op == 'import':
+                    for obj in self.import_queue:
+                        self.created.emit(obj, set(['import']))
+                    for obj, origin in self.import_updates:
+                        obj.updated.emit(origin)
+                    self.import_queue = []
+                    self.import_updates = {}
+                    self.is_importing = False
+                    self.process_done.emit(op, result)
+                elif op == 'export':
+                    self.process_done.emit(op, result)
                 else:
                     print 'Unexpected op from dbworker', op
         except Queue.Empty:
@@ -270,6 +290,7 @@ class DBManager(QtCore.QObject):
         self.post('export', filename)
 
     def import_data(self, filename):
+        self.is_importing = True
         self.post('import', filename)
 
 class Batch(QtCore.QObject, Finishable):

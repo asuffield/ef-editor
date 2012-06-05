@@ -1093,6 +1093,9 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         filenames = self.saveexport.selectedFiles()
         filename = str(filenames[0])
 
+        self.status_start('Exporting database', 0)
+        self.dbmanager.export_data(filename)
+
     def handle_import(self):
         if not self.openimport.exec_():
             return
@@ -1102,8 +1105,12 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         filenames = self.openimport.selectedFiles()
         filename = str(filenames[0])
 
+        self.status_start('Importing database', 0)
+        self.dbmanager.import_data(filename)
+
     def handle_db_process_done(self, process, msg):
         QtGui.QMessageBox.information(self, "Finished %s" % process, msg)
+        self.status_finished()
 
 def setup():
     datadir = QtGui.QDesktopServices.storageLocation(QtGui.QDesktopServices.DataLocation)
