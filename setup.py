@@ -22,5 +22,5 @@ setup(
         ],
 
     # targets to build
-    windows = ["ef-image-editor.py"],
+    windows = ["ef-image-editor.py", 'membercheck.py', 'duplicatedetect.py'],
     )
