@@ -11,11 +11,7 @@ class NetworkError(Exception):
 
 class NetworkTimeout(NetworkError):
     def __init__(self, url):
-        NetworkError.__init__(self, 'Network operation timed out for %s' % url.toString())
-
-def qt_relative_url(reply, url):
-    relative_url = QtCore.QUrl(url)
-    return reply.url().resolved(relative_url)
+        NetworkError.__init__(self, 'Network operation timed out for %s' % url.toEncoded())
 
 class QNetworkReplyOp(TaskOp):
     def __init__(self, reply, timeout=None, redirecter=None):
@@ -37,7 +33,7 @@ class QNetworkReplyOp(TaskOp):
             self._exception.connect(redirecter.rethrow)
 
     def __str__(self):
-        return 'QNetworkReply(%s)' % self.reply.url().toString()
+        return 'QNetworkReply(%s)' % self.reply.url().toEncoded()
 
     def resolve_url(self, relative_url):
         if self.redirected_to is not None:

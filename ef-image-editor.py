@@ -119,7 +119,10 @@ class ImageListItem(QtGui.QStandardItem):
         self.loading = False
         self.photo_load_retries = 0
         # Populate the disk cache in the background, but don't load into the application just yet
-        self.downloader.download_photo(self.photo.id, self.photo.url, self.photo.full_path(), background=True)
+        refresh_size = False
+        if self.photo.width == 0 and self.photo.height == 0:
+            refresh_size = True
+        self.downloader.download_photo(self.photo.id, self.photo.url, self.photo.full_path(), background=True, refresh_size=refresh_size)
         self.emitDataChanged()
 
     def registrations_updated(self):
@@ -292,6 +295,8 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
 
         self.settings = QtCore.QSettings()
 
+        self.main_stack.setCurrentIndex(1)
+
         self.history_make_current.setIcon(self.style().standardIcon(QtGui.QStyle.SP_ArrowRight))
         self.back.setIcon(self.style().standardIcon(QtGui.QStyle.SP_ArrowBack))
         self.forwards.setIcon(self.style().standardIcon(QtGui.QStyle.SP_ArrowForward))
@@ -309,6 +314,7 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         self.current_image = None
         self.loading_now = False
         self.photo_load_failed = False
+        self.registration_loaded = self.person_loaded = False
 
         self.history_back = deque()
         self.history_forwards = deque()
@@ -947,8 +953,14 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         if isinstance(obj, Person):
             item = self.image_list_items[obj.id] = ImageListItem(self.photodownloader, self.list_photo_cache, obj)
             self.person_model.appendRow(item)
+
+            if self.person_loaded and -1 == self.filter_police.findText(obj.police_status):
+                self.filter_police.addItem(obj.police_status)
         elif isinstance(obj, Event):
             self.filter_event.addItem(obj.name, obj.id)
+        elif isinstance(obj, Registration):
+            if self.registration_loaded and -1 == self.filter_category.findText(obj.attendee_type):
+                self.filter_category.addItem(obj.attendee_type)            
 
     def handle_db_exception(self, e, msg):
         print >>sys.stderr, msg
@@ -964,9 +976,13 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
 
             for status in sorted(Person.statuses):
                 self.filter_police.addItem(status)
+            self.person_loaded = True
+
+            self.main_stack.setCurrentIndex(0)
         elif table == 'registration':
             for category in sorted(Registration.categories):
                 self.filter_category.addItem(category)
+            self.registration_loaded = True
 
     def handle_filter_event_changed(self, index):
         id = self.filter_event.itemData(index).toPyObject()

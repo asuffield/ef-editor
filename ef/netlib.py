@@ -122,6 +122,7 @@ manager = None
 def start_network_manager():
     global manager
     manager = QtNetwork.QNetworkAccessManager()
+    #manager.setProxy(QtNetwork.QNetworkProxy(QtNetwork.QNetworkProxy.HttpProxy, '127.0.0.1', 8080))
 
 def stop_network_manager():
     global manager
@@ -170,7 +171,3 @@ def qt_readall_charset(reply, charset):
     if charset is not None:
         data = data.decode(charset)
     return data
-
-def qt_relative_url(reply, url):
-    relative_url = QtCore.QUrl(url)
-    return reply.url().resolved(relative_url)

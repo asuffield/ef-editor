@@ -181,7 +181,9 @@ class UploadTask(Task, NetFuncs):
 
         link = soup.find('a', href=re.compile(r'^/LIBDEMS/media/delegate_files/'))
 
-        new_photo_url = str(self.current.resolve_url(link['href']).toString())
+        href_url = QtCore.QUrl()
+        url.setEncodedUrl(link['href'])
+        new_photo_url = str(self.current.resolve_url(href_url).toEncoded())
 
         while not re.search(r'Booking details', soup.find_all('h1')[1].text.strip(), re.I):
             soup = yield self.submit_form(soup.form)

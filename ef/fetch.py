@@ -111,8 +111,9 @@ class PhotosTask(Task, NetFuncs):
             soup = yield self.get('https://www.eventsforce.net/libdems/backend/home/codEditMain.csp?codReadOnly=1&personID=%d&curPage=1' % person.id)
             img = soup.find('img', title='Picture Profile')
             if img is not None:
-                url = str(self.current.resolve_url(img['src']).toString())
-                fetched = FetchedPhoto(person, url, self.batch)
+                url = QtCore.QUrl()
+                url.setEncodedUrl(img['src'])
+                fetched = FetchedPhoto(person, str(self.current.resolve_url(url).toEncoded()), self.batch)
                 self.db_tasks.append(fetched)
 
         self.batch.finish()

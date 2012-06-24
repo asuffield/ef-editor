@@ -8,6 +8,8 @@ Suppress exception popups when one is already on screen
 
 Lock database so only one can be open
 
+Fetch 'missing or bad' photos doesn't fetch photos for which we have URLs but which do not work. Change this.
+
 High priority features
 ----------------------
 use pyinstaller instead of py2exe
@@ -29,6 +31,3 @@ Fix abuses of super() by getting rid of them. super() is insane
 Purge habitual getters/setters
 
 Multiple simultaneous uploads, for speed? Downloads? Priority of those?
-
-Use a stacked "loading" widget to make it clear when long-running
-operations (initial load, export, import) are running.
