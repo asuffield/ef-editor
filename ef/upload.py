@@ -1,5 +1,6 @@
 from __future__ import division
 import re
+import sys
 from PyQt4 import QtCore
 from ef.lib import SignalGroup
 from ef.db import Person, Photo, Registration, Batch, FetchedPhoto
@@ -128,7 +129,9 @@ class UploadTask(Task, NetFuncs):
             return
         soup = yield self.get(link)
 
-        while not re.match(r'Photo upload', soup.find_all('h1')[1].text.strip(), re.I):
+        while not soup.find_all(['h1', 'h2', 'h3', 'h4'], text=re.compile('\s*Photo Upload\s*')):
+            if not soup.form:
+                self.error.emit("Could not find form on registration pages (while looking for photo upload)")
             soup = yield self.submit_form(soup.form)
 
         remove_link = soup.find('a', text='remove', href=re.compile(r'javascript: removeFile'))
@@ -182,7 +185,7 @@ class UploadTask(Task, NetFuncs):
         link = soup.find('a', href=re.compile(r'^/LIBDEMS/media/delegate_files/'))
 
         href_url = QtCore.QUrl()
-        url.setEncodedUrl(link['href'])
+        href_url.setEncodedUrl(link['href'])
         new_photo_url = str(self.current.resolve_url(href_url).toEncoded())
 
         while not re.search(r'Booking details', soup.find_all('h1')[1].text.strip(), re.I):
@@ -235,7 +238,7 @@ class UploadWorker(QtCore.QObject):
             if self.people_filter['mode'] == 'percent':
                 self.percent_filter = self.people_filter['filter']
 
-            self.people = People.all_with_photos('good')
+            self.people = Person.all_with_photos('good')
         else:
             self.people = self.people_filter['people']
 
