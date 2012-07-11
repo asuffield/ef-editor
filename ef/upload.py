@@ -189,15 +189,19 @@ class UploadTask(Task, NetFuncs):
         new_photo_url = str(self.current.resolve_url(href_url).toEncoded())
 
         while not re.search(r'Booking details', soup.find_all('h1')[1].text.strip(), re.I):
+            if not soup.form:
+                self.error.emit("Could not find form on registration pages (while looking for final booking details page)")
             soup = yield self.submit_form(soup.form)
 
         final_proceed_button = soup.find('input', type='button', onclick=re.compile(r'gotoReceipt'))
+        if not final_proceed_button:
+            self.error.emit("Could not find final SAVE button")
         link = self.extract_link_from_silly_button(final_proceed_button)
         soup = yield self.get(link)
 
         link = soup.find('a', text='CONFIRM')
-
-        soup = yield self.get(link['href'])
+        if link:
+            soup = yield self.get(link['href'])
 
         if not re.search(r'Booking confirmation', soup.find_all('h1')[1].text, re.I):
             self.error.emit('Final page after upload did not look right, did something bad happen?')

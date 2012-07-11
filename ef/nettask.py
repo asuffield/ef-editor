@@ -136,13 +136,23 @@ class NetFuncs(object):
             if not input.has_key('name'):
                 continue
             name = input['name']
-            if input['type'] == 'image':
+            type = input['type'].lower()
+            if type == 'image':
                 fields['%s.x' % name] = '1'
                 fields['%s.y' % name] = '1'
-            elif input['type'] == 'button':
+            elif type == 'button':
                 continue
+            elif type == 'checkbox' or type == 'radio':
+                if input.has_key('checked'):
+                    fields[name] = input['value']
             elif input.has_key('value'):
                 fields[name] = input['value']
+
+        for select in form.find_all('select'):
+            name = select['name']
+            selected = filter(lambda o: o.has_key('selected'), select.find_all('option'))
+            if len(selected):
+                fields[name] = selected[0]['value']
 
         fields.update(user_fields)
 

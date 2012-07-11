@@ -119,16 +119,21 @@ def encode_form_fields(fields):
 
 manager = None
 
+def ignoreSslErrors(reply, errors):
+    reply.ignoreSslErrors()
+
 def start_network_manager():
     global manager
     manager = QtNetwork.QNetworkAccessManager()
     #manager.setProxy(QtNetwork.QNetworkProxy(QtNetwork.QNetworkProxy.HttpProxy, '127.0.0.1', 8080))
+    #manager.sslErrors.connect(ignoreSslErrors)
 
 def stop_network_manager():
     global manager
     manager = None
 
 def qt_form_post(url, fields, file=None):
+    #print "Post", url
     request = QtNetwork.QNetworkRequest(QtCore.QUrl(url))
     if file is None:
         request.setHeader(QtNetwork.QNetworkRequest.ContentTypeHeader, 'application/x-www-form-urlencoded; charset=utf-8')
@@ -152,6 +157,7 @@ def qt_form_post(url, fields, file=None):
     return reply
 
 def qt_page_get(url):
+    #print "Get", url
     request = QtNetwork.QNetworkRequest(QtCore.QUrl(url))
     reply = manager.get(request)
     return reply
