@@ -2,6 +2,7 @@ from ef.task import TaskOp, Task
 from PyQt4 import QtCore, QtNetwork
 from ef.netlib import split_header_words, qt_page_get, qt_form_post
 from bs4 import BeautifulSoup
+import re
 
 class NetworkError(Exception):
     def __init__(self, value):
@@ -136,6 +137,9 @@ class NetFuncs(object):
             if not input.has_key('name'):
                 continue
             name = input['name']
+            if input.has_key('disabled'):
+                print "Skipping disabled select", name
+                continue
             type = input['type'].lower()
             if type == 'image':
                 fields['%s.x' % name] = '1'
@@ -147,13 +151,38 @@ class NetFuncs(object):
                     fields[name] = input['value']
             elif input.has_key('value'):
                 fields[name] = input['value']
+                #if input['value'] == 'Northern Ireland':
+                #    f = open('tmp.html', 'w')
+                #    soup = list(form.parents)[-2]
+                #    print soup
+                #    f.write(str(soup))
+                #    f.close()
 
         for select in form.find_all('select'):
+            if not select.has_key('name'):
+                continue
             name = select['name']
+            if select.has_key('disabled'):
+                print "Skipping disabled select", name
+                continue
             selected = filter(lambda o: o.has_key('selected'), select.find_all('option'))
             if len(selected):
                 fields[name] = selected[0]['value']
 
+        # Hideous eventsforce hack: they do this field-disabling mess in javascript
+        for script in form.find_all('script'):
+            m = re.search(r"depends = depends \+ '(.*)'", script.text)
+            if m:
+                depend_str = m.group(1)
+                m = re.match(r'^(.*)->(.*)->(.*)\|$', depend_str)
+                child_field = m.group(1)
+                parent_field = m.group(2)
+                parent_value = m.group(3)
+                if fields.has_key(parent_field) and fields.has_key(child_field):
+                    if fields[parent_field] != parent_value:
+                        del fields[child_field]
+
         fields.update(user_fields)
+        #print fields
 
         return self.post(action, fields, file, timeout=timeout, parse_only=parse_only)
