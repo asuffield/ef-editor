@@ -23,6 +23,7 @@ def catcherror(func):
 class UploadTask(Task, NetFuncs):
     completed = QtCore.pyqtSignal(bool)
     error = QtCore.pyqtSignal(str)
+    progress = QtCore.pyqtSignal(int)
 
     def __init__(self, person, minimum_change, batch):
         Task.__init__(self)
@@ -115,6 +116,8 @@ class UploadTask(Task, NetFuncs):
     def task(self, image):
         soup = yield self.get('https://www.eventsforce.net/libdems/backend/home/codEditMain.csp?codReadOnly=1&personID=%d&curPage=1' % self.person.id)
 
+        self.progress.emit(1)
+
         links = soup.find_all('a', href=re.compile(r'^\.\./\.\./frontend/reg/initSession'))
         if not len(links):
             self.error.emit("Could not find any event links in page for %s" % self.person)
@@ -123,16 +126,39 @@ class UploadTask(Task, NetFuncs):
         link = links[-1]['href']
         soup = yield self.get(link)
 
+        self.progress.emit(2)
+
         edit_button = soup.find('input', type='button', value='Edit')
         link = self.extract_link_from_silly_button(edit_button)
         if link is None:
             return
         soup = yield self.get(link)
 
-        while not soup.find_all(['h1', 'h2', 'h3', 'h4'], text=re.compile('\s*Photo Upload\s*')):
+        self.progress.emit(3)
+
+        limit = 20
+        while limit > 0 and not soup.find_all(['h1', 'h2', 'h3', 'h4'], text=re.compile(r'\s*Photo Upload\s*')):
             if not soup.form:
                 self.error.emit("Could not find form on registration pages (while looking for photo upload)")
             soup = yield self.submit_form(soup.form)
+            error = soup.find('script', text=re.compile(r".*alert\('Error", re.S|re.I))
+            if error:
+                m = re.search(r"alert\('(.*)'\);", error.text, re.S|re.I)
+                if m:
+                    msg = m.group(1)
+                    msg = msg.replace(r'\r', '\r').replace(r'\n', '\n')
+                    self.error.emit("Error from eventsforce: %s" % msg)
+                else:
+                    self.error.emit("Eventsforce generated an error, but it couldn't be recognised. Please try the web interface to see what's going on.")
+            limit = limit - 1
+
+        if limit == 0:
+            #f = open('tmp.html', 'w')
+            #f.write(str(soup))
+            #f.close()
+            self.error.emit("Failed to find photo upload on registration pages")
+
+        self.progress.emit(4)
 
         remove_link = soup.find('a', text='remove', href=re.compile(r'javascript: removeFile'))
         m = re.search(r'removeFile\((\d+)\s*,\s*(\d+)\)', remove_link['href'])
@@ -143,6 +169,8 @@ class UploadTask(Task, NetFuncs):
         item_name_id = m.group(2)
 
         soup = yield self.submit_form(soup.form, {'deleteFile': item_name_id, 'uploadTempPersonID': temp_person_id, 'uploadItemNameID': item_name_id})
+
+        self.progress.emit(5)
 
         upload_button = soup.find('input', type='button', value='Upload')
         m = re.search(r'SaveAndUpload\((\d+)\s*,\s*(\d+)\s*,\s*(\d+)\)', upload_button['onclick'])
@@ -155,12 +183,17 @@ class UploadTask(Task, NetFuncs):
         guest_number = m.group(3)
 
         soup = yield self.submit_form(soup.form, {'uploadFile': '1', 'uploadTempPersonID': temp_person_id, 'uploadGuestNumber': guest_number, 'uploadDataID': data_id})
+        self.progress.emit(6)
         soup = yield self.submit_form(soup.form, {}, self.prepare_file_upload('FileStream', image))
+        self.progress.emit(7)
 
         for script in soup.find_all('script'):
             m = re.match(r'^\s*window\.location=\'(.*)\';', script.text)
             if m:
                 break
+        if not m:
+            #print soup
+            self.error.emit("Could not process photo upload (failed to find javascript refresh)")
         link = m.group(1)
 
         if re.search(r'File could not be saved', link):
@@ -175,12 +208,18 @@ class UploadTask(Task, NetFuncs):
             self.error.emit("Upload failed, error link: %s" % link)
             return
 
+        self.progress.emit(8)
+
         soup = yield self.get(link)
+
+        self.progress.emit(9)
 
         ok_button = soup.find('input', type='button', value='OK')
         link = self.extract_link_from_silly_button(ok_button)
 
         soup = yield self.get(link)
+
+        self.progress.emit(10)
 
         link = soup.find('a', href=re.compile(r'^/LIBDEMS/media/delegate_files/'))
 
@@ -188,10 +227,17 @@ class UploadTask(Task, NetFuncs):
         href_url.setEncodedUrl(link['href'])
         new_photo_url = str(self.current.resolve_url(href_url).toEncoded())
 
-        while not re.search(r'Booking details', soup.find_all('h1')[1].text.strip(), re.I):
+        limit = 20
+        while limit > 0 and not re.search(r'Booking details', soup.find_all('h1')[1].text.strip(), re.I):
             if not soup.form:
                 self.error.emit("Could not find form on registration pages (while looking for final booking details page)")
             soup = yield self.submit_form(soup.form)
+            limit = limit - 1
+
+        if limit == 0:
+            self.error.emit("Failed to reach end of registration pages after uploading photo")
+
+        self.progress.emit(11)
 
         final_proceed_button = soup.find('input', type='button', onclick=re.compile(r'gotoReceipt'))
         if not final_proceed_button:
@@ -199,9 +245,13 @@ class UploadTask(Task, NetFuncs):
         link = self.extract_link_from_silly_button(final_proceed_button)
         soup = yield self.get(link)
 
+        self.progress.emit(12)
+
         link = soup.find('a', text='CONFIRM')
         if link:
             soup = yield self.get(link['href'])
+
+        self.progress.emit(13)
 
         if not re.search(r'Booking confirmation', soup.find_all('h1')[1].text, re.I):
             self.error.emit('Final page after upload did not look right, did something bad happen?')
@@ -210,12 +260,25 @@ class UploadTask(Task, NetFuncs):
         if self.photo.opinion == 'ok':
             new_opinion = 'ok'
 
+        print "Uploaded", self.person.fullname
         self.fetchedphoto = FetchedPhoto(self.person, new_photo_url, self.batch, opinion=new_opinion)
+
+def person_has_edits(person):
+    photo = Photo.get(id=person.current_photo_id)
+    if photo.crop_centre_x != 0.5 or photo.crop_centre_y != 0.5 or photo.crop_scale != 1:
+        return True
+    if photo.brightness != 0 or photo.contrast != 0 or photo.gamma != 1:
+        return True
+    if photo.rotate != 0:
+        return True
+    return False
 
 class UploadWorker(QtCore.QObject):
     completed = QtCore.pyqtSignal()
     error = QtCore.pyqtSignal(str)
     progress = QtCore.pyqtSignal(str, int, int)
+
+    task_progress_size = 14
     
     def __init__(self):
         super(QtCore.QObject, self).__init__()
@@ -246,6 +309,10 @@ class UploadWorker(QtCore.QObject):
         else:
             self.people = self.people_filter['people']
 
+        self.people = filter(person_has_edits, self.people)
+
+        #print self.people
+
         self.login_task = LoginTask(self.username, self.password)
         self.login_task.task_exception.connect(self.handle_login_exception)
         self.login_task.start_task()
@@ -254,7 +321,7 @@ class UploadWorker(QtCore.QObject):
         self.progress.emit('Logging in', 0, 0)
 
     def next_task(self):
-        self.progress.emit('Uploading photos', self.i, len(self.people))
+        self.progress.emit('Uploading photos', self.i * self.task_progress_size, len(self.people) * self.task_progress_size)
 
         if self.i >= len(self.people):
             self.batch.progress.connect(self.handle_commit_progress)
@@ -263,9 +330,11 @@ class UploadWorker(QtCore.QObject):
 
         try:
             person = self.people[self.i]
+            self.progress.emit('Uploading %s' % person, self.i * self.task_progress_size, len(self.people) * self.task_progress_size)
             self.tasks[person.id] = UploadTask(person, self.percent_filter, self.batch)
             self.tasks[person.id].completed.connect(self.handle_task_complete)
             self.tasks[person.id].error.connect(self.handle_error)
+            self.tasks[person.id].progress.connect(self.handle_task_progress)
             self.tasks[person.id].start()
         except Exception:
             self.error.emit(traceback.format_exc())
@@ -275,6 +344,10 @@ class UploadWorker(QtCore.QObject):
             self.upload_count = self.upload_count + 1
         self.i = self.i + 1
         self.next_task()
+
+    def handle_task_progress(self, i):
+        person = self.people[self.i]
+        self.progress.emit('Uploading %s' % person, self.i * self.task_progress_size + i, len(self.people) * self.task_progress_size)
 
     def handle_commit_progress(self, cur, max):
         self.progress.emit('Saving new photo URLs', cur, max)
