@@ -3,6 +3,7 @@ from ef.db import Person, Photo, Event, Registration, Batch, FetchedPhoto
 from ef.parser import EFDelegateParser
 import traceback
 import time
+import re
 from ef.login import LoginTask, LoginError
 from ef.nettask import NetFuncs
 from ef.task import Task, TaskList
@@ -20,11 +21,13 @@ class PersonDBParser(EFDelegateParser):
         self.batch = batch
 
     def handle_person(self, person):
+        firstname = person['Firstname'] or person['common first name']
+        fullname = filter(lambda x: len(x) > 0, [person['Salutation'].strip(), firstname.strip(), person['Lastname'].strip()])
         Person.upsert({'id': person['Person ID'],
-                       'firstname': person['Firstname'] or person['common first name'],
-                       'lastname': person['Lastname'],
-                       'title': person['Salutation'],
-                       'fullname': person['Full Name'],
+                       'firstname': firstname.strip(),
+                       'lastname': person['Lastname'].strip(),
+                       'title': person['Salutation'].strip(),
+                       'fullname': ' '.join(fullname),
                        'police_status': person['EF_Application Status'],
                        'last_checked_at': time.time(),
                        }, batch=self.batch)
@@ -54,19 +57,41 @@ def catcherror(func):
     return wrapped
 
 class ReportTask(Task, NetFuncs):
-    def __init__(self, report, progress):
+    def __init__(self, event, since, progress):
         Task.__init__(self)
         NetFuncs.__init__(self)
 
         self.progress = progress
-        self.report = report
+        self.event = event
+        self.since = since
     
     def task(self):
         self.batch = Batch()
         self.parser = PersonDBParser(self.progress, self.batch)
 
         self.progress.emit('Running report', 0, 0)
-        soup = yield self.get('https://www.eventsforce.net/libdems/backend/home/dynaRepRun.csp?profileID=%s' % self.report, timeout=None)
+        soup = yield self.get('https://www.eventsforce.net/libdems/backend/home/dynaRepRun.csp?profileID=69', timeout=None)
+
+        date_id = None
+        event_id = None
+        for elem in soup.find_all('input', {'type': 'hidden', 'name': re.compile(r'^criteriaDescription')}):
+            m = re.match(r'^criteriaDescription_(\d+)$', elem['name'])
+            if m:
+                this_id = m.group(1)
+            else:
+                continue
+            if elem['value'] == 'Amendment Date':
+                date_id = this_id
+            elif elem['value'] == 'In Event':
+                event_id = this_id
+
+        if date_id is None or event_id is None:
+            raise FetchError("Failed to parse form from eventsforce (couldn't find in report parameters: %s, %s)" % (date_id, event_id))
+
+        soup = yield self.submit_form(soup.form, {'value1_%s' % date_id: self.since.toString('dd-MMM-yyyy'),
+                                                  'value2_%s' % date_id: QtCore.QDate.currentDate().toString('dd-MMM-yyyy'),
+                                                  'value1_%s' % event_id: str(self.event),
+                                                  })
 
         img = soup.find('img', title='Export to Excel')
         if img is None:
@@ -123,30 +148,30 @@ class PhotosTask(Task, NetFuncs):
         self.progress.emit('Saving photo URLs', cur, max)
 
 class FetchTask(TaskList):
-    def __init__(self, fetch_report, fetch_photos, username, password, progress, batch):
+    def __init__(self, fetch_event, fetch_since, fetch_photos, username, password, progress, batch):
         tasks = [LoginTask(username, password)]
-        if fetch_report:
-            tasks.append(ReportTask(fetch_report, progress))
+        if fetch_event:
+            tasks.append(ReportTask(fetch_event, fetch_since, progress))
         if fetch_photos != 'none':
             tasks.append(PhotosTask(progress, fetch_photos, batch))
         TaskList.__init__(self, tasks)
 
 class FetchWorker(QtCore.QObject):
-    completed = QtCore.pyqtSignal()
+    completed = QtCore.pyqtSignal(int)
     error = QtCore.pyqtSignal(str)
     progress = QtCore.pyqtSignal(str, int, int)
     
     def __init__(self):
         QtCore.QObject.__init__(self)
 
-    @QtCore.pyqtSlot(int, str, str, str)
+    @QtCore.pyqtSlot(int, QtCore.QDate, str, str, str)
     @catcherror
-    def start_fetch(self, fetch_report, fetch_photos, username, password):
+    def start_fetch(self, fetch_event, fetch_since, fetch_photos, username, password):
         self.batch = Batch()
-        self.task = FetchTask(fetch_report, fetch_photos, username, password, self.progress, self.batch)
+        self.task = FetchTask(fetch_event, fetch_since, fetch_photos, username, password, self.progress, self.batch)
         self.task.task_finished.connect(self.batch.finish)
         self.task.task_exception.connect(self.handle_exception)
-        self.batch.finished.connect(self.completed)
+        self.batch.finished.connect(lambda: self.completed.emit(fetch_event))
         self.progress.emit('Logging in', 0, 0)
 
         self.task.start_task()
@@ -158,7 +183,7 @@ class FetchWorker(QtCore.QObject):
             self.error.emit(msg)
 
 class Fetcher(QtCore.QObject):
-    sig_start_fetch = QtCore.pyqtSignal(int, str, str, str)
+    sig_start_fetch = QtCore.pyqtSignal(int, QtCore.QDate, str, str, str)
     
     def __init__(self):
         super(QtCore.QObject, self).__init__()
@@ -175,5 +200,5 @@ class Fetcher(QtCore.QObject):
         self.error = self.fetcher.error
         self.progress = self.fetcher.progress
         
-    def start_fetch(self, fetch_report, fetch_photos, username, password):
-        self.sig_start_fetch.emit(fetch_report, fetch_photos, username, password)
+    def start_fetch(self, fetch_event, fetch_since, fetch_photos, username, password):
+        self.sig_start_fetch.emit(fetch_event, fetch_since, fetch_photos, username, password)

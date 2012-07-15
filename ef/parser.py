@@ -78,12 +78,11 @@ class EFDelegateParser(EFParser):
         return id
 
     def handle_record(self, record):
-        if record['Person ID'] == '':
-            return
-
         try:
+            if record['Person ID'] == '':
+                return
             person_id = record['Person ID'] = int(record['Person ID'])
-        except ValueError:
+        except (KeyError, ValueError):
             print "Confusing nonsense in person record", record
             return
 
@@ -93,7 +92,10 @@ class EFDelegateParser(EFParser):
             person = self.people[person_id] = {'events': {}}
             for key in person_fields:
                 if key in record:
-                    person[key] = record.pop(key)
+                    value = record.pop(key)
+                    # Suppress duplicates (take the first thing in the report), but prefer non-zero-length values
+                    if 0 == len(person.get(key, '')):
+                        person[key] = value
             # Record changes size here, so must not be an iterator...
             for key in record.keys():
                 if re.match(r'^Local Party', key):

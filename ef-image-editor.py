@@ -889,9 +889,10 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
     def handle_fetch_rejected(self):
         self.set_ef_ops_enabled(True)
 
-    def handle_fetch_completed(self):
+    def handle_fetch_completed(self, event):
         self.set_ef_ops_enabled(True)
         self.status_finished()
+        QtCore.QSettings().setValue('last-fetched-%d' % event, QtCore.QDate.currentDate().toString(QtCore.Qt.ISODate))
 
     def handle_reportsfetch_error(self, err):
         print >>sys.stderr, err
