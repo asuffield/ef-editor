@@ -74,12 +74,12 @@
     <item>
      <widget class="QLabel" name="label">
       <property name="text">
-       <string>What data should be fetched from eventsforce?</string>
+       <string>What event should be fetched from eventsforce?</string>
       </property>
      </widget>
     </item>
     <item>
-     <widget class="QComboBox" name="fetch_people_report">
+     <widget class="QComboBox" name="fetch_event">
       <property name="enabled">
        <bool>false</bool>
       </property>
@@ -89,6 +89,37 @@
        </property>
       </item>
      </widget>
+    </item>
+    <item>
+     <layout class="QHBoxLayout" name="horizontalLayout">
+      <property name="topMargin">
+       <number>0</number>
+      </property>
+      <item>
+       <widget class="QLabel" name="label_5">
+        <property name="text">
+         <string>Fetch all data since</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QDateEdit" name="fetch_since">
+        <property name="enabled">
+         <bool>false</bool>
+        </property>
+        <property name="date">
+         <date>
+          <year>2012</year>
+          <month>1</month>
+          <day>1</day>
+         </date>
+        </property>
+        <property name="calendarPopup">
+         <bool>true</bool>
+        </property>
+       </widget>
+      </item>
+     </layout>
     </item>
     <item>
      <widget class="QGroupBox" name="fetch_photos_group">

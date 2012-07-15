@@ -5,6 +5,7 @@ from ef.login import LoginTask, LoginError
 from ef.nettask import NetFuncs
 from ef.task import Task, TaskList
 
+# This isn't used right now, fetches the list of reports
 class ReportListTask(Task, NetFuncs):
     def __init__(self):
         Task.__init__(self)
@@ -29,6 +30,22 @@ class ReportListTask(Task, NetFuncs):
                 except TypeError:
                     pass
 
+# Currently using this one, fetches parameters from report 69
+class ReportParamsTask(Task, NetFuncs):
+    def __init__(self):
+        Task.__init__(self)
+        NetFuncs.__init__(self)
+
+        self.reports = []
+
+    def task(self):
+        soup = yield self.get('https://www.eventsforce.net/libdems/backend/home/dynaRepRun.csp?profileID=69')
+        select = soup.find('select', {'name': re.compile(r'^value1_')})
+        for option in select.find_all('option'):
+            if not option.has_key('value'):
+                continue
+            self.reports.append((option.text, int(option['value'])))
+
 class ReportsFetchWorker(QtCore.QObject):
     completed = QtCore.pyqtSignal(list)
     error = QtCore.pyqtSignal(str)
@@ -38,7 +55,7 @@ class ReportsFetchWorker(QtCore.QObject):
 
     @QtCore.pyqtSlot(str, str)
     def start_fetch(self, username, password):
-        self.reportslist_task = ReportListTask()
+        self.reportslist_task = ReportParamsTask()
         self.task = TaskList(LoginTask(username, password), self.reportslist_task)
         self.task.task_finished.connect(self.handle_finished)
         self.task.task_exception.connect(self.handle_exception)
