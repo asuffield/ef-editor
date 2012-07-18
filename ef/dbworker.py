@@ -335,6 +335,7 @@ def setup_session(datadir):
                        contrast float default 0.0,
                        gamma float default 1.0,
                        rotate FLOAT default 0,
+                       block_upload boolean default 0,
                        opinion VARCHAR(6) default 'unsure',
                        PRIMARY KEY (id),
                        UNIQUE(url, person_id),
@@ -355,6 +356,8 @@ def setup_session(datadir):
             conn.execute('''alter table photo add column contrast float default 0.0''')
         if not columns.has_key('gamma'):
             conn.execute('''alter table photo add column gamma float default 1.0''')
+        if not columns.has_key('block_upload'):
+            conn.execute('''alter table photo add column block_upload boolean default 0''')
             
     if 'event' not in tables:
         conn.execute('''CREATE TABLE event (

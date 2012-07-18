@@ -5,29 +5,35 @@ class FetchWizard(QtGui.QWizard, Ui_LoadPeopleWizard):
     start_fetch = QtCore.pyqtSignal(int, QtCore.QDate, str, str, str)
     start_fetch_reports = QtCore.pyqtSignal(str, str)
     
-    def __init__(self, parent=None):
+    def __init__(self, username, password, parent=None):
         super(QtGui.QWizard, self).__init__(parent)
         self.setupUi(self)
 
         self.settings = settings = QtCore.QSettings()
+        self.username = username
+        self.password = password
 
         self.last_event, ok = settings.value('ef-fetch-event', '').toInt()
         if not ok:
             self.last_event = None
 
-        self.ef_username.setText(settings.value('ef-username', '').toString())
         self.setButtonText(QtGui.QWizard.FinishButton, 'Start download')
         self.fetch_since.setDate(QtCore.QDate.currentDate())
 
         self.accepted.connect(self.handle_accepted)
-        self.currentIdChanged.connect(self.handle_changed)
         self.fetch_event.currentIndexChanged.connect(self.handle_event_changed)
         self.fetch_since.dateChanged.connect(self.handle_date_changed)
         self.date_has_changed = False
 
-        self.page(0).registerField('username', self.ef_username)
-        self.page(0).registerField('password*', self.ef_password)
-        self.page(1).registerField('event*', self.fetch_event, 'currentText', self.fetch_event.currentIndexChanged)
+        self.page(0).registerField('event*', self.fetch_event, 'currentText', self.fetch_event.currentIndexChanged)
+
+    def show(self):
+        QtGui.QWizard.show(self)
+
+        self.fetch_event.clear()
+        self.fetch_event.addItem('Loading...')
+        self.fetch_event.setEnabled(False)
+        self.start_fetch_reports.emit(self.username, self.password)
 
     @QtCore.pyqtSlot(list)
     def reports_ready(self, events_list):
@@ -57,16 +63,6 @@ class FetchWizard(QtGui.QWizard, Ui_LoadPeopleWizard):
     def handle_date_changed(self, date):
         self.date_has_changed = True
 
-    def handle_changed(self, page_id):
-        if page_id == 1:
-            username = str(self.ef_username.text())
-            password = str(self.ef_password.text())
-
-            self.fetch_event.clear()
-            self.fetch_event.addItem('Loading...')
-            self.fetch_event.setEnabled(False)
-            self.start_fetch_reports.emit(username, password)
-
     def handle_accepted(self):
         fetch_event = self.fetch_event.itemData(self.fetch_event.currentIndex()).toPyObject()
         if fetch_event is None:
@@ -77,11 +73,8 @@ class FetchWizard(QtGui.QWizard, Ui_LoadPeopleWizard):
             fetch_photos = 'missing'
         elif self.fetch_photos_all.isChecked():
             fetch_photos = 'all'
-        username = str(self.ef_username.text())
-        password = str(self.ef_password.text())
 
-        QtCore.QSettings().setValue('ef-username', username)
         if fetch_event:
             QtCore.QSettings().setValue('ef-fetch-event', fetch_event)
 
-        self.start_fetch.emit(fetch_event, self.fetch_since.date(), fetch_photos, username, password)
+        self.start_fetch.emit(fetch_event, self.fetch_since.date(), fetch_photos, self.username, self.password)

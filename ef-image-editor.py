@@ -23,6 +23,7 @@ from ef.fetchwizard import FetchWizard
 from ef.upload import Uploader
 from ef.netlib import start_network_manager
 from ef.filtercontrol import FilterProxyModel
+from ef.trylogin import TryLogin
 from collections import deque
 from datetime import datetime
 from PIL import Image
@@ -295,7 +296,16 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
 
         self.settings = QtCore.QSettings()
 
-        self.main_stack.setCurrentIndex(1)
+        self.main_stack.setCurrentIndex(0)
+
+        self.username = self.settings.value('ef-username', '').toString()
+        self.ef_username.setText(self.username)
+        self.password = ''
+        self.try_login = TryLogin()
+        self.try_login.completed.connect(self.try_login_completed)
+        self.try_login.error.connect(self.try_login_error)
+        self.ef_login.clicked.connect(self.try_ef_login)
+        self.ef_password.returnPressed.connect(self.try_ef_login)
 
         self.history_make_current.setIcon(self.style().standardIcon(QtGui.QStyle.SP_ArrowRight))
         self.back.setIcon(self.style().standardIcon(QtGui.QStyle.SP_ArrowBack))
@@ -358,6 +368,7 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         self.filter_police.currentIndexChanged[str].connect(self.person_model_proxy.set_police_status)
         self.filter_by_size.stateChanged.connect(self.person_model_proxy.set_only_bad_sizes)
         self.filter_only_missing.stateChanged.connect(self.person_model_proxy.set_only_missing)
+        self.filter_only_upload.stateChanged.connect(self.person_model_proxy.set_only_upload)
 
         self.filters_reset.clicked.connect(self.handle_reset_filters)
         self.export_people.clicked.connect(self.handle_export_people)
@@ -384,12 +395,14 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         self.opinion_ok.clicked.connect(self.handle_opinion_ok)
         self.opinion_bad.clicked.connect(self.handle_opinion_bad)
         self.opinion_unsure.clicked.connect(self.handle_opinion_unsure)
+        self.do_not_upload.stateChanged.connect(self.handle_do_not_upload)
         self.back.clicked.connect(self.handle_back)
         self.forwards.clicked.connect(self.handle_forwards)
         self.search.clicked.connect(self.handle_search)
         self.search_for.returnPressed.connect(self.handle_search)
 
         self.action_fetch.triggered.connect(self.handle_fetch_wizard)
+        self.fetch_this_person.clicked.connect(self.handle_fetch_person)
 
         self.fetcher.completed.connect(self.handle_fetch_completed)
         self.fetcher.error.connect(self.handle_fetch_error)
@@ -800,6 +813,7 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
             self.opinion_bad.setChecked(True)
         elif opinion == 'unsure':
             self.opinion_unsure.setChecked(True)
+        self.do_not_upload.setChecked(self.current_photo.block_upload)
 
         self.image_draw_needed = False
 
@@ -824,6 +838,15 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         
     def handle_opinion_unsure(self):
         self._handle_opinion('unsure')
+
+    def handle_do_not_upload(self, state):
+        if self.loading_now:
+            return
+        
+        if self.current_photo is None:
+            return
+
+        self.current_photo.update_block_upload(state)
 
     def handle_rotate(self, angle):
         if self.current_image is not None and not self.loading_now:
@@ -876,14 +899,25 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
     def set_ef_ops_enabled(self, enabled):
         self.action_fetch.setEnabled(enabled)
         self.action_upload.setEnabled(enabled)
+        self.fetch_this_person.setEnabled(enabled)
 
     def handle_fetch_wizard(self):
-        self.fetch_wizard = FetchWizard()
+        self.fetch_wizard = FetchWizard(self.username, self.password)
         self.fetch_wizard.start_fetch.connect(self.fetcher.start_fetch)
         self.fetch_wizard.rejected.connect(self.handle_fetch_rejected)
         self.fetch_wizard.start_fetch_reports.connect(self.reportsfetcher.start_fetch)
         self.reportsfetcher.completed.connect(self.fetch_wizard.reports_ready)
         self.fetch_wizard.show()
+        self.set_ef_ops_enabled(False)
+
+    def handle_fetch_person(self):
+        if self.loading_now:
+            return
+        
+        if self.current_person is None:
+            return
+
+        self.fetcher.start_fetch_person(self.current_person.id, self.username, self.password)
         self.set_ef_ops_enabled(False)
 
     def handle_fetch_rejected(self):
@@ -892,7 +926,8 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
     def handle_fetch_completed(self, event):
         self.set_ef_ops_enabled(True)
         self.status_finished()
-        QtCore.QSettings().setValue('last-fetched-%d' % event, QtCore.QDate.currentDate().toString(QtCore.Qt.ISODate))
+        if event > 0:
+            QtCore.QSettings().setValue('last-fetched-%d' % event, QtCore.QDate.currentDate().toString(QtCore.Qt.ISODate))
 
     def handle_reportsfetch_error(self, err):
         print >>sys.stderr, err
@@ -909,7 +944,6 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         self.progress.setValue(cur)
 
     def handle_upload_wizard(self):
-        self.upload_wizard.ef_username.setText(self.settings.value('ef-username', '').toString())
         # XXX: move to "change of current_person" functions
         self.upload_wizard.upload_photos_thisone.setEnabled(self.current_person is not None)
         self.upload_wizard.show()
@@ -929,10 +963,8 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
             upload_photos = {'mode': 'good'}
         else:
             return
-        username = str(self.upload_wizard.ef_username.text())
-        password = str(self.upload_wizard.ef_password.text())
-
-        QtCore.QSettings().setValue('ef-username', username)
+        username = self.username
+        password = self.password
 
         self.uploader.start_upload(upload_photos, username, password)
 
@@ -959,6 +991,11 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
                 self.filter_police.addItem(obj.police_status)
         elif isinstance(obj, Event):
             self.filter_event.addItem(obj.name, obj.id)
+            default_event, ok = self.settings.value('filter-event', '0').toInt()
+            if ok and obj.id == default_event:
+                index = self.filter_event.findData(default_event)
+                if index >= 0:
+                    self.filter_event.setCurrentIndex(index)
         elif isinstance(obj, Registration):
             if self.registration_loaded and -1 == self.filter_category.findText(obj.attendee_type):
                 self.filter_category.addItem(obj.attendee_type)            
@@ -979,7 +1016,11 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
                 self.filter_police.addItem(status)
             self.person_loaded = True
 
-            self.main_stack.setCurrentIndex(0)
+            self.main_stack.setCurrentIndex(1)
+            if self.username == '':
+                self.ef_username.setFocus()
+            else:
+                self.ef_password.setFocus()
         elif table == 'registration':
             for category in sorted(Registration.categories):
                 self.filter_category.addItem(category)
@@ -988,6 +1029,7 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
     def handle_filter_event_changed(self, index):
         id = self.filter_event.itemData(index).toPyObject()
         self.person_model_proxy.set_event_id(id)
+        QtCore.QSettings().setValue('filter-event', id)
 
     def handle_openeventsforce(self):
         if self.current_person is not None:
@@ -1071,6 +1113,7 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         self.filter_police.setCurrentIndex(0)
         self.filter_by_size.setChecked(False)
         self.filter_only_missing.setChecked(False)
+        self.filter_only_upload.setChecked(False)
 
         self.search_for.setText('')
 
@@ -1128,6 +1171,22 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
     def handle_db_process_done(self, process, msg):
         QtGui.QMessageBox.information(self, "Finished %s" % process, msg)
         self.status_finished()
+
+    def try_ef_login(self):
+        self.username = str(self.ef_username.text())
+        self.password = str(self.ef_password.text())
+
+        QtCore.QSettings().setValue('ef-username', self.username)
+
+        self.try_login.start_login(self.username, self.password)
+        self.ef_login.setEnabled(False)
+
+    def try_login_completed(self):
+        self.main_stack.setCurrentIndex(2)
+
+    def try_login_error(self, msg):
+        self.login_error.setText(msg)
+        self.ef_login.setEnabled(True)
 
 def setup():
     datadir = QtGui.QDesktopServices.storageLocation(QtGui.QDesktopServices.DataLocation)

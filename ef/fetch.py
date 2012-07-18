@@ -7,6 +7,7 @@ import re
 from ef.login import LoginTask, LoginError
 from ef.nettask import NetFuncs
 from ef.task import Task, TaskList
+from bs4 import SoupStrainer
 
 class FetchError(Exception):
     def __init__(self, msg):
@@ -118,22 +119,22 @@ class ReportTask(Task, NetFuncs):
         self.progress.emit('Saving people', cur, max)
 
 class PhotosTask(Task, NetFuncs):
-    def __init__(self, progress, which, batch):
+    def __init__(self, progress, people, batch):
         Task.__init__(self)
         NetFuncs.__init__(self)
 
         self.progress = progress
-        self.which = which
+        self.people = people
         self.batch = batch
 
     def task(self):
-        people = Person.all_with_photos(self.which)
-
         self.db_tasks = []
 
-        for i, person in enumerate(people):
-            self.progress.emit('Finding photos', i, len(people))
-            soup = yield self.get('https://www.eventsforce.net/libdems/backend/home/codEditMain.csp?codReadOnly=1&personID=%d&curPage=1' % person.id)
+        login_strainer = SoupStrainer(['img'])
+
+        for i, person in enumerate(self.people):
+            self.progress.emit('Finding photos', i, len(self.people))
+            soup = yield self.get('https://www.eventsforce.net/libdems/backend/home/codEditMain.csp?codReadOnly=1&personID=%d&curPage=1' % person.id, parse_only=login_strainer)
             img = soup.find('img', title='Picture Profile')
             if img is not None:
                 url = QtCore.QUrl()
@@ -153,7 +154,15 @@ class FetchTask(TaskList):
         if fetch_event:
             tasks.append(ReportTask(fetch_event, fetch_since, progress))
         if fetch_photos != 'none':
-            tasks.append(PhotosTask(progress, fetch_photos, batch))
+            people = Person.all_with_photos(fetch_photos)
+            tasks.append(PhotosTask(progress, people, batch))
+        TaskList.__init__(self, tasks)
+
+class FetchPersonTask(TaskList):
+    def __init__(self, person, username, password, progress, batch):
+        tasks = [LoginTask(username, password)]
+        # XXX: We should also fetch the person's record, but that would mean writing a parser for it
+        tasks.append(PhotosTask(progress, [Person.get(id=person)], batch))
         TaskList.__init__(self, tasks)
 
 class FetchWorker(QtCore.QObject):
@@ -176,6 +185,18 @@ class FetchWorker(QtCore.QObject):
 
         self.task.start_task()
 
+    @QtCore.pyqtSlot(int, QtCore.QDate, str, str, str)
+    @catcherror
+    def start_fetch_person(self, person, username, password):
+        self.batch = Batch()
+        self.task = FetchPersonTask(person, username, password, self.progress, self.batch)
+        self.task.task_finished.connect(self.batch.finish)
+        self.task.task_exception.connect(self.handle_exception)
+        self.batch.finished.connect(lambda: self.completed.emit(0))
+        self.progress.emit('Logging in', 0, 0)
+
+        self.task.start_task()
+
     def handle_exception(self, e, msg):
         if isinstance(e, LoginError):
             self.error.emit(str(e))
@@ -184,6 +205,7 @@ class FetchWorker(QtCore.QObject):
 
 class Fetcher(QtCore.QObject):
     sig_start_fetch = QtCore.pyqtSignal(int, QtCore.QDate, str, str, str)
+    sig_start_fetch_person = QtCore.pyqtSignal(int, str, str)
     
     def __init__(self):
         super(QtCore.QObject, self).__init__()
@@ -192,6 +214,7 @@ class Fetcher(QtCore.QObject):
         #self.fetcher.moveToThread(thread_registry.get('network'))
 
         self.sig_start_fetch.connect(self.fetcher.start_fetch)
+        self.sig_start_fetch_person.connect(self.fetcher.start_fetch_person)
 
         # This is an interesting idiom: copy the bound signals into
         # this object, so clients can just connect to them and hear
@@ -202,3 +225,6 @@ class Fetcher(QtCore.QObject):
         
     def start_fetch(self, fetch_event, fetch_since, fetch_photos, username, password):
         self.sig_start_fetch.emit(fetch_event, fetch_since, fetch_photos, username, password)
+
+    def start_fetch_person(self, person, username, password):
+        self.sig_start_fetch_person.emit(person, username, password)
