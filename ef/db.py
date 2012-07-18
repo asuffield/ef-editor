@@ -344,6 +344,9 @@ class Batch(QtCore.QObject, Finishable):
         if self.finish_called and self.ops_started == self.ops_committed and len(self.children) == len(self.finished_children):
             self.finished.emit()
 
+def conv_bool(v):
+    return v.toBool()
+
 def conv_int(v):
     i,ok = v.toInt()
     return int(i)
@@ -383,6 +386,7 @@ class Photo(DBBase):
                   'gamma' : conv_float,
                   'rotate' : conv_float,
                   'opinion' : conv_str,
+                  'block_upload' : conv_bool,
                   }
 
     by_person_dict = {}
@@ -422,6 +426,11 @@ class Photo(DBBase):
     def update_opinion(self, opinion, origin=''):
         self.update({'id': self.id,
                      'opinion': opinion,
+                     }, origin)
+
+    def update_block_upload(self, state, origin=''):
+        self.update({'id': self.id,
+                     'block_upload': state,
                      }, origin)
 
     def update_rotation(self, angle, origin=''):

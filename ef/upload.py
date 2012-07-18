@@ -161,18 +161,22 @@ class UploadTask(Task, NetFuncs):
         self.progress.emit(4)
 
         remove_link = soup.find('a', text='remove', href=re.compile(r'javascript: removeFile'))
-        m = re.search(r'removeFile\((\d+)\s*,\s*(\d+)\)', remove_link['href'])
-        if not m:
-            self.error.emit("Could not parse javascript remove function %s" % remove_link['href'])
-            return
-        temp_person_id = m.group(1)
-        item_name_id = m.group(2)
+        if remove_link:
+            m = re.search(r'removeFile\((\d+)\s*,\s*(\d+)\)', remove_link['href'])
+            if not m:
+                self.error.emit("Could not parse javascript remove function %s" % remove_link['href'])
+                return
+            temp_person_id = m.group(1)
+            item_name_id = m.group(2)
 
-        soup = yield self.submit_form(soup.form, {'deleteFile': item_name_id, 'uploadTempPersonID': temp_person_id, 'uploadItemNameID': item_name_id})
+            soup = yield self.submit_form(soup.form, {'deleteFile': item_name_id, 'uploadTempPersonID': temp_person_id, 'uploadItemNameID': item_name_id})
 
         self.progress.emit(5)
 
         upload_button = soup.find('input', type='button', value='Upload')
+        if not upload_button:
+            self.error.emit("Could not find image 'Upload' button in eventsforce page")
+            return
         m = re.search(r'SaveAndUpload\((\d+)\s*,\s*(\d+)\s*,\s*(\d+)\)', upload_button['onclick'])
         if not m:
             self.error.emit("Could not parse javascript handler link %s" % upload_button['onclick'])
@@ -260,17 +264,32 @@ class UploadTask(Task, NetFuncs):
         if self.photo.opinion == 'ok':
             new_opinion = 'ok'
 
-        print "Uploaded", self.person.fullname
         self.fetchedphoto = FetchedPhoto(self.person, new_photo_url, self.batch, opinion=new_opinion)
 
-def person_has_edits(person):
+def person_should_upload(person):
+    if person.current_photo_id is None:
+        return False
     photo = Photo.get(id=person.current_photo_id)
+    if photo.block_upload:
+        return False
+
+    if photo.width * photo.height == 0:
+        return False
+
+    space_used = (6 * photo.height) / (8 * photo.width)
+    if space_used > 1:
+        space_used = 1 / space_used
+
+    if space_used < 0.95:
+        return True
+
     if photo.crop_centre_x != 0.5 or photo.crop_centre_y != 0.5 or photo.crop_scale != 1:
         return True
     if photo.brightness != 0 or photo.contrast != 0 or photo.gamma != 1:
         return True
     if photo.rotate != 0:
         return True
+
     return False
 
 class UploadWorker(QtCore.QObject):
@@ -309,7 +328,7 @@ class UploadWorker(QtCore.QObject):
         else:
             self.people = self.people_filter['people']
 
-        self.people = filter(person_has_edits, self.people)
+        self.people = filter(person_should_upload, self.people)
 
         #print self.people
 

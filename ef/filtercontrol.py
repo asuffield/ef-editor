@@ -3,6 +3,7 @@ from __future__ import division
 from PyQt4 import QtCore, QtGui
 from PIL import Image
 from ef.db import Photo
+from ef.upload import person_should_upload
 import os
 import traceback
 
@@ -13,6 +14,7 @@ class FilterProxyModel(QtGui.QSortFilterProxyModel):
         self.id = None
         self.only_bad_sizes = False
         self.only_missing = False
+        self.only_upload = False
         self.opinion = 'unsure'
         self.police_status = 'any'
         self.event_id = None
@@ -36,6 +38,10 @@ class FilterProxyModel(QtGui.QSortFilterProxyModel):
 
     def set_only_missing(self, state):
         self.only_missing = state
+        self.invalidateFilter()
+
+    def set_only_upload(self, state):
+        self.only_upload = state
         self.invalidateFilter()
 
     def set_category(self, category):
@@ -98,6 +104,11 @@ class FilterProxyModel(QtGui.QSortFilterProxyModel):
                 x,y = size
                 if x > 0 and y > 0:
                     return False
+
+        if self.only_upload:
+            person, photo = model.data(index, QtCore.Qt.UserRole+10).toPyObject()
+            if not person_should_upload(person):
+                return False
 
         if self.only_bad_sizes:
             if self.is_size_ok(index):

@@ -2,7 +2,7 @@ from distutils.core import setup
 import py2exe
 
 setup(
-    version = "0.1.0",
+    version = "0.9.15",
     description = "Image editor for eventsforce",
     name = "ef-image-editor",
 

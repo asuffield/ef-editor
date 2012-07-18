@@ -25,7 +25,7 @@ class LoginTask(Task, NetFuncs):
         soup = yield self.get('https://www.eventsforce.net/libdems/backend/home/login.csp', parse_only=SoupStrainer('form'))
 
         login_strainer = SoupStrainer(['script', 'title', 'span'])
-        
+
         soup = yield self.submit_form(soup.form, {'txtUsername': self.username, 'txtPassword': self.password}, parse_only=login_strainer)
 
         # Follow hideous javascript redirect that they snuck into the login sequence
