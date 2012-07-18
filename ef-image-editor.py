@@ -1194,7 +1194,7 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
 
     def photodownload_error(self, id, msg):
         photo = Photo.get(id=id)
-        self.photo.update_load_failed(True)
+        photo.update_load_failed(True)
 
 def setup():
     datadir = QtGui.QDesktopServices.storageLocation(QtGui.QDesktopServices.DataLocation)
