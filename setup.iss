@@ -3,8 +3,8 @@
 
 #define MyAppName "EF Image Editor"
 #define MyAppPublisher "Andrew Suffield"
-#define MyAppExeName "dist\ef-image-editor.exe"
-#define MyAppVersion GetFileVersion(AddBackslash(SourcePath) + MyAppExeName)
+#define MyAppExeName "ef-image-editor.exe"
+#define MyAppVersion GetFileVersion(AddBackslash(SourcePath) + "dist\" + MyAppExeName)
 
 [Setup]
 ; NOTE: The value of AppId uniquely identifies this application.
