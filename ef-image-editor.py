@@ -133,11 +133,14 @@ class ImageListItem(QtGui.QStandardItem):
     def handle_photo_ready(self, id, image):
         self.loading = False
         self.emitDataChanged()
+        self.photo.update_load_failed(False)
 
     def handle_photo_fail(self, id, error):
         self.loading = False
         self.photo_load_retries = self.photo_load_retries + 1
         self.emitDataChanged()
+        if self.photo_load_retries > 1:
+            self.photo.update_load_failed(True)
 
     def get_photo(self):
         if self.photo_load_retries > 3 or self.photo is None or self.loading:
@@ -493,6 +496,7 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         self.image_draw_needed = False
 
         self.photodownloader.queue_size.connect(self.status_downloader)
+        self.photodownloader.error.connect(self.photodownload_error)
 
         self.procs = {}
 
@@ -1187,6 +1191,10 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
     def try_login_error(self, msg):
         self.login_error.setText(msg)
         self.ef_login.setEnabled(True)
+
+    def photodownload_error(self, id, msg):
+        photo = Photo.get(id=id)
+        self.photo.update_load_failed(True)
 
 def setup():
     datadir = QtGui.QDesktopServices.storageLocation(QtGui.QDesktopServices.DataLocation)

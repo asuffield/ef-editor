@@ -387,6 +387,7 @@ class Photo(DBBase):
                   'rotate' : conv_float,
                   'opinion' : conv_str,
                   'block_upload' : conv_bool,
+                  'load_failed' : conv_bool,
                   }
 
     by_person_dict = {}
@@ -431,6 +432,11 @@ class Photo(DBBase):
     def update_block_upload(self, state, origin=''):
         self.update({'id': self.id,
                      'block_upload': state,
+                     }, origin)
+
+    def update_load_failed(self, state, origin=''):
+        self.update({'id': self.id,
+                     'load_failed': state,
                      }, origin)
 
     def update_rotation(self, angle, origin=''):
