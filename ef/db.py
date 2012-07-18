@@ -493,7 +493,7 @@ class Person(DBBase):
     @classmethod
     def all_with_photos(self, which):
         if which == 'missing':
-            f = lambda person: person.current_photo_id is None or Photo.get(id=person.current_photo_id).load_failed Photo.get(id=person.current_photo_id).opinion == 'bad'
+            f = lambda person: person.current_photo_id is None or Photo.get(id=person.current_photo_id).load_failed or Photo.get(id=person.current_photo_id).opinion == 'bad'
         elif which == 'good':
             f = lambda person: person.current_photo_id is not None and Photo.get(id=person.current_photo_id).opinion == 'ok'
         else:
