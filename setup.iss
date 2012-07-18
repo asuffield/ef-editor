@@ -2,9 +2,9 @@
 ; SEE THE DOCUMENTATION FOR DETAILS ON CREATING INNO SETUP SCRIPT FILES!
 
 #define MyAppName "EF Image Editor"
-#define MyAppVersion "0.9.11"
 #define MyAppPublisher "Andrew Suffield"
-#define MyAppExeName "ef-image-editor.exe"
+#define MyAppExeName "dist\ef-image-editor.exe"
+#define MyAppVersion GetFileVersion(AddBackslash(SourcePath) + MyAppExeName)
 
 [Setup]
 ; NOTE: The value of AppId uniquely identifies this application.
