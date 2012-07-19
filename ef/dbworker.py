@@ -99,7 +99,7 @@ class DBWorker(object):
                 self.do_insert(queued['table'], queued['values'], queued['origin'])
                 for k,v in queued['batches'].iteritems():
                     batches[k] = v + batches.get(k, 0)
-                
+
             while self.write_cache and not timed_out():
                 k, queued = self.write_cache.popitem(last=False)
                 table,key = k
@@ -111,8 +111,12 @@ class DBWorker(object):
                     batches[k] = v + batches.get(k, 0)
             trans.commit()
         except:
-            trans.rollback()
-            raise
+            exc_info = sys.exc_info()
+            try:
+                trans.rollback()
+            except:
+                pass
+            raise exc_info[0], exc_info[1], exc_info[2]
 
         for k, v in batches.iteritems():
             self.post('batch_committed', (k,v))

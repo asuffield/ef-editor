@@ -439,7 +439,7 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         self.action_reloadphoto.triggered.connect(self.handle_reloadphoto)
         self.action_editimage.triggered.connect(self.handle_editimage)
         self.editimage.clicked.connect(self.handle_editimage)
-        self.action_importphoto.triggered.connect(self.handle_import)
+        self.action_importphoto.triggered.connect(self.handle_import_photo)
 
         self.openimage = QtGui.QFileDialog(self, 'Import image')
         self.openimage.setFileMode(QtGui.QFileDialog.ExistingFile)
@@ -473,7 +473,7 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         self.saveexport.setDefaultSuffix('yaml')
         self.saveexport.restoreState(self.settings.value('saveexport-state', '').toByteArray())
 
-        self.openimport = QtGui.QFileDialog(self, 'Import image')
+        self.openimport = QtGui.QFileDialog(self, 'Import database')
         self.openimport.setFileMode(QtGui.QFileDialog.ExistingFile)
         self.openimport.setNameFilter('*.yaml')
         self.openimport.restoreState(self.settings.value('openimport-state', '').toByteArray())
@@ -1076,7 +1076,7 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
     def handle_process_finished(self, pid):
         proc = self.procs.pop(pid, None)
 
-    def handle_import(self):
+    def handle_import_photo(self):
         if self.current_person is None:
             return
 
