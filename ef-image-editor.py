@@ -542,10 +542,16 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         if self.status_started is not None:
             self.status.setText("%s (%s)" % (self.status_task, self.status_elapsed_str())) 
 
-    def status_finished(self):
+    def status_finishing(self):
         if self.status_started is not None:
             self.status_timer.stop()
             self.status.setText("%s (finished in %s)" % (self.status_task, self.status_elapsed_str())) 
+
+    def status_finished(self):
+        if self.status_started is not None:
+            if self.status_timer.isActive():
+                self.status_timer.stop()
+                self.status.setText("%s (finished in %s)" % (self.status_task, self.status_elapsed_str())) 
             self.progress.setRange(0, 1)
             self.progress.setValue(1)
             self.status_started = None
@@ -939,6 +945,7 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
 
     def handle_fetch_error(self, err):
         print >>sys.stderr, err
+        self.status_finishing()
         QtGui.QMessageBox.information(self, "Error during fetch", err)
         self.set_ef_ops_enabled(True)
         self.status_finished()
@@ -978,6 +985,7 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
 
     def handle_upload_error(self, err):
         print >>sys.stderr, err
+        self.status_finishing()
         QtGui.QMessageBox.information(self, "Error during upload", err)
         self.set_ef_ops_enabled(True)
         self.status_finished()
@@ -1173,6 +1181,7 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         self.dbmanager.import_data(filename)
 
     def handle_db_process_done(self, process, msg):
+        self.status_finishing()
         QtGui.QMessageBox.information(self, "Finished %s" % process, msg)
         self.status_finished()
 
