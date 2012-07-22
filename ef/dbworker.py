@@ -9,10 +9,7 @@ from collections import deque, OrderedDict
 from sqlalchemy.engine import reflection
 from sqlalchemy.sql import select, update, insert
 import Queue
-try:
-    from yaml import CLoader as Loader, CDumper as Dumper
-except ImportError:
-    from yaml import Loader, Dumper
+from yaml import CLoader as Loader, CDumper as Dumper
 
 class DBImportError(Exception):
     def __init__(self, msg):
@@ -236,6 +233,9 @@ class DBWorker(object):
             values = dict(row.items())
             key = self.extract_key(table_name, values)
             self.post('insert', {'table': table_name, 'key': key, 'values': values, 'origin': origin})
+            return key
+        else:
+            return None
 
     def import_data(self, filename):
         try:
@@ -269,24 +269,32 @@ class DBWorker(object):
         try:
             for table_name in data:
                 print "Importing", table_name
-                if table_name == 'photo' or table_name == 'person':
+                table = self.tables[table_name]
+                if table_name == 'person':
                     for row in data[table_name]:
-                        key_fields = self.key_fields(table_name)
-                        table = self.tables[table_name]
-
-                        q = select([table])
-                        for col in table.primary_key.columns:
-                            q = q.where(col == row[col.name])
-
+                        if not row.has_key('id'):
+                            continue
+                        q = select([table]).where(table.c.id == row['id'])
                         r = self.conn.execute(q).fetchone()
                     
                         if r is not None:
-                            if table_name == 'photo':
-                                self.do_merge_photo(r, row)
-                            else:
-                                self.do_merge_person(r, row)
+                            self.do_merge_person(r, row)
                         else:
                             self.do_insert(table_name, row, set(['import']))
+                elif table_name == 'photo':
+                    for row in data[table_name]:
+                        if not row.has_key('url'):
+                            continue
+                        q = select([table]).where(table.c.url == row['url'])
+                        r = self.conn.execute(q).fetchone()
+
+                        if r is not None:
+                            self.do_merge_photo(r, row)
+                            photo_id = r['id']
+                        else:
+                            key = self.do_insert(table_name, row, set(['import']))
+                            photo_id = key['id']
+                        self.do_merge_current_photo(r['person_id'], photo_id)
                 else:
                     for row in data[table_name]:
                         self.do_upsert(table_name, row, set(['import']))
@@ -303,19 +311,14 @@ class DBWorker(object):
         print "Done importing"
 
     def do_merge_photo(self, old, new):
-        if old['url'] != new['url']:
-            if old['date_fetched'] > new['date_fetched']:
-                # Forget it if we're looking at an older fetch
-                return
-        else:
-            # url is the same, so fields relating to the photo are
-            # presumed to be the same. Only edit fields should be
-            # different
-            if old['date_edited'] > new['date_edited']:
-                # ...and we want to keep the edit fields from the copy
-                # in the database, because that was edited more
-                # recently
-                return
+        # url is the same, so fields relating to the photo are
+        # presumed to be the same. Only edit fields should be
+        # different
+        if old['date_edited'] > new['date_edited']:
+            # ...and we want to keep the edit fields from the copy
+            # in the database, because that was edited more
+            # recently
+            return
 
         if old['date_edited'] == 0 and new['date_edited'] == 0:
             # Both records are from before the date_edited flag began
@@ -334,6 +337,35 @@ class DBWorker(object):
     def do_merge_person(self, old, new):
         if new['last_checked_at'] > old['last_checked_at']:
             self.do_update('person', new, set(['import']))
+
+    def do_merge_current_photo(self, person_id, photo_id):
+        person_table = self.tables['person']
+        photo_table = self.tables['photo']
+        person = self.conn.execute(select([person_table.c.current_photo_id]).where(person_table.c.id == person_id)).fetchone()
+        if person is None:
+            # Should never happen
+            return
+
+        current_photo_id = person['current_photo_id']
+        if current_photo_id is not None:
+            if photo_id == current_photo_id:
+                # Nothing to do anyway if they're the same - this means we
+                # just updated the current photo with new edits
+                return
+            current_photo = self.conn.execute(select([photo_table]).where(photo_table.c.id == current_photo_id)).fetchone()
+            imported_photo = self.conn.execute(select([photo_table]).where(photo_table.c.id == photo_id)).fetchone()
+            if imported_photo is None:
+                # Should never happen
+                return
+            if current_photo is not None:
+                if current_photo['date_fetched'] > imported_photo['date_fetched']:
+                    # The imported photo is older, so stop here
+                    return
+
+        # The imported photo should become the current photo - it's
+        # more recent. Edits don't matter if we pulled a new photo
+        # from eventsforce.
+        self.do_update('person', {'id': person_id, 'current_photo_id': photo_id}, set(['import']))
 
     def prepare_export(self):
         data = {'$id': 'ef-image-editor export'}
