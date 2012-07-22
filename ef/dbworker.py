@@ -265,13 +265,75 @@ class DBWorker(object):
         if data.pop('$id', '') != 'ef-image-editor export':
             raise DBImportError('This does not look like a valid database export')
 
-        for table_name in data:
-            for row in data[table_name]:
-                self.upsert(table_name, row, 'import', 0)
+        trans = self.conn.begin()
+        try:
+            for table_name in data:
+                print "Importing", table_name
+                if table_name == 'photo' or table_name == 'person':
+                    for row in data[table_name]:
+                        key_fields = self.key_fields(table_name)
+                        table = self.tables[table_name]
 
-        print "Processing queues..."
-        self.process_queues(-1)
+                        q = select([table])
+                        for col in table.primary_key.columns:
+                            q = q.where(col == row[col.name])
+
+                        r = self.conn.execute(q).fetchone()
+                    
+                        if r is not None:
+                            if table_name == 'photo':
+                                self.do_merge_photo(r, row)
+                            else:
+                                self.do_merge_person(r, row)
+                        else:
+                            self.do_insert(table_name, row, set(['import']))
+                else:
+                    for row in data[table_name]:
+                        self.do_upsert(table_name, row, set(['import']))
+            print "Committing..."
+            trans.commit()
+        except:
+            exc_info = sys.exc_info()
+            try:
+                trans.rollback()
+            except:
+                pass
+            raise exc_info[0], exc_info[1], exc_info[2]
+
         print "Done importing"
+
+    def do_merge_photo(self, old, new):
+        if old['url'] != new['url']:
+            if old['date_fetched'] > new['date_fetched']:
+                # Forget it if we're looking at an older fetch
+                return
+        else:
+            # url is the same, so fields relating to the photo are
+            # presumed to be the same. Only edit fields should be
+            # different
+            if old['date_edited'] > new['date_edited']:
+                # ...and we want to keep the edit fields from the copy
+                # in the database, because that was edited more
+                # recently
+                return
+
+        if old['date_edited'] == 0 and new['date_edited'] == 0:
+            # Both records are from before the date_edited flag began
+            # to be stored, or have no edits
+            if new['opinion'] == 'unsure' and old['opinion'] != 'unsure':
+                # The old record was changed from 'unsure' and the new
+                # record has no opinion, so assume the old record was
+                # edited
+                return
+        elif old['date_edited'] == new['date_edited']:
+            # No edit happened, so don't waste time writing it
+            return
+
+        self.do_update('photo', new, set(['import']))
+
+    def do_merge_person(self, old, new):
+        if new['last_checked_at'] > old['last_checked_at']:
+            self.do_update('person', new, set(['import']))
 
     def prepare_export(self):
         data = {'$id': 'ef-image-editor export'}
@@ -329,6 +391,8 @@ def setup_session(datadir):
                        url VARCHAR,
                        filename varchar,
                        date_fetched float,
+                       date_edited float default 0.0,
+                       uploaded boolean default 0,
                        person_id INTEGER,
                        width integer default 0,
                        height integer default 0,
@@ -365,6 +429,10 @@ def setup_session(datadir):
             conn.execute('''alter table photo add column block_upload boolean default 0''')
         if not columns.has_key('load_failed'):
             conn.execute('''alter table photo add column load_failed boolean default 0''')
+        if not columns.has_key('uploaded'):
+            conn.execute('''alter table photo add column uploaded boolean default 0''')
+        if not columns.has_key('date_edited'):
+            conn.execute('''alter table photo add column date_edited float default 0.0''')
 
     if 'event' not in tables:
         conn.execute('''CREATE TABLE event (

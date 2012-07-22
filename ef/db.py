@@ -262,7 +262,7 @@ class DBManager(QtCore.QObject):
                     for obj, origin in self.import_updates:
                         obj.updated.emit(origin)
                     self.import_queue = []
-                    self.import_updates = {}
+                    self.import_updates = []
                     self.is_importing = False
                     self.process_done.emit(op, result)
                 elif op == 'export':
@@ -377,6 +377,8 @@ class Photo(DBBase):
                   'width': conv_int,
                   'height': conv_int,
                   'date_fetched' : conv_float,
+                  'date_edited' : conv_float,
+                  'uploaded' : conv_bool,
                   'person_id' : conv_int,
                   'crop_centre_x' : conv_float,
                   'crop_centre_y' : conv_float,
@@ -422,16 +424,19 @@ class Photo(DBBase):
                      'crop_centre_x': centre_x,
                      'crop_centre_y': centre_y,
                      'crop_scale': scale,
+                     'date_edited': time.time(),
                      }, origin)
 
     def update_opinion(self, opinion, origin=''):
         self.update({'id': self.id,
                      'opinion': opinion,
+                     'date_edited': time.time(),
                      }, origin)
 
     def update_block_upload(self, state, origin=''):
         self.update({'id': self.id,
                      'block_upload': state,
+                     'date_edited': time.time(),
                      }, origin)
 
     def update_load_failed(self, state, origin=''):
@@ -442,21 +447,25 @@ class Photo(DBBase):
     def update_rotation(self, angle, origin=''):
         self.update({'id': self.id,
                      'rotate': angle,
+                     'date_edited': time.time(),
                      }, origin)
 
     def update_brightness(self, brightness, origin=''):
         self.update({'id': self.id,
                      'brightness': brightness,
+                     'date_edited': time.time(),
                      }, origin)
 
     def update_contrast(self, contrast, origin=''):
         self.update({'id': self.id,
                      'contrast': contrast,
+                     'date_edited': time.time(),
                      }, origin)
 
     def update_gamma(self, gamma, origin=''):
         self.update({'id': self.id,
                      'gamma': gamma,
+                     'date_edited': time.time(),
                      }, origin)
 
 class Person(DBBase):
@@ -605,7 +614,7 @@ class FindPhotos(Query):
         return map(unpack_row, self.rows())
 
 class FetchedPhoto(QtCore.QObject):
-    def __init__(self, person, url, batch, opinion=None, local_filename=None):
+    def __init__(self, person, url, batch, opinion=None, local_filename=None, uploaded=False):
         QtCore.QObject.__init__(self)
 
         self.person = person
@@ -618,7 +627,7 @@ class FetchedPhoto(QtCore.QObject):
         photo = self.find_photo()
 
         if photo is None:
-            values = {'date_fetched': time.time()}
+            values = {'date_fetched': time.time(), 'uploaded': uploaded}
             values['person_id'] = self.person.id
             if self.opinion is not None:
                 values['opinion'] = self.opinion

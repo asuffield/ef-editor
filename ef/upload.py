@@ -264,7 +264,7 @@ class UploadTask(Task, NetFuncs):
         if self.photo.opinion == 'ok':
             new_opinion = 'ok'
 
-        self.fetchedphoto = FetchedPhoto(self.person, new_photo_url, self.batch, opinion=new_opinion)
+        self.fetchedphoto = FetchedPhoto(self.person, new_photo_url, self.batch, opinion=new_opinion, uploaded=True)
 
 def person_should_upload(person):
     if person.current_photo_id is None:
