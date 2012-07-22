@@ -21,7 +21,7 @@ def catcherror(func):
     return wrapped
 
 class UploadTask(Task, NetFuncs):
-    completed = QtCore.pyqtSignal(bool)
+    completed = QtCore.pyqtSignal(bool, bool)
     error = QtCore.pyqtSignal(str)
     progress = QtCore.pyqtSignal(int)
 
@@ -35,6 +35,7 @@ class UploadTask(Task, NetFuncs):
         self.reply = None
         self.minimum_change = minimum_change
         self.skipped = False
+        self.aborted = False
 
         self.task_finished.connect(self.complete)
         self.task_exception.connect(self.handle_exception)
@@ -80,8 +81,12 @@ class UploadTask(Task, NetFuncs):
         # Start the process of uploading the edited image to eventsforce
         self.start_task(image)
 
+    def abort(self):
+        self.aborted = True
+        Task.abort(self)
+
     def complete(self):
-        self.completed.emit(not self.skipped)
+        self.completed.emit(not self.skipped, self.aborted)
 
     def handle_exception(self, e, msg):
         self.error.emit(msg)
@@ -201,13 +206,9 @@ class UploadTask(Task, NetFuncs):
         link = m.group(1)
 
         if re.search(r'File could not be saved', link):
-            # retry loop is being constructed here - can't reproduce reliably so one piece at a time
-            soup = yield self.get(link)
-            print link
-            print soup
-            soup = yield self.submit_form(soup.form)
-            print soup
-        
+            self.error.emit("Eventsforce broke while uploading file")
+            return
+
         if not re.search(r'uploadSuccess=1', link):
             self.error.emit("Upload failed, error link: %s" % link)
             return
@@ -226,6 +227,9 @@ class UploadTask(Task, NetFuncs):
         self.progress.emit(10)
 
         link = soup.find('a', href=re.compile(r'^/LIBDEMS/media/delegate_files/'))
+        if not link:
+            self.error.emit("Could not find link to newly uploaded file")
+            return
 
         href_url = QtCore.QUrl()
         href_url.setEncodedUrl(link['href'])
@@ -293,6 +297,7 @@ def person_should_upload(person):
     return False
 
 class UploadWorker(QtCore.QObject):
+    # XXX: this should be a task
     completed = QtCore.pyqtSignal()
     error = QtCore.pyqtSignal(str)
     progress = QtCore.pyqtSignal(str, int, int)
@@ -318,6 +323,7 @@ class UploadWorker(QtCore.QObject):
         self.username = username
         self.password = password
         self.percent_filter = 0
+        self.retry_limit = 3
 
         if self.people_filter['mode'] == 'good' or self.people_filter['mode'] == 'percent':
             self.people = None
@@ -351,17 +357,20 @@ class UploadWorker(QtCore.QObject):
             person = self.people[self.i]
             self.progress.emit('Uploading %s' % person, self.i * self.task_progress_size, len(self.people) * self.task_progress_size)
             self.tasks[person.id] = UploadTask(person, self.percent_filter, self.batch)
+            self.current_task = self.tasks[person.id]
             self.tasks[person.id].completed.connect(self.handle_task_complete)
-            self.tasks[person.id].error.connect(self.handle_error)
+            self.tasks[person.id].error.connect(self.handle_upload_error)
             self.tasks[person.id].progress.connect(self.handle_task_progress)
             self.tasks[person.id].start()
         except Exception:
             self.error.emit(traceback.format_exc())
 
-    def handle_task_complete(self, uploaded):
-        if uploaded:
-            self.upload_count = self.upload_count + 1
-        self.i = self.i + 1
+    def handle_task_complete(self, uploaded, aborted):
+        if not aborted:
+            if uploaded:
+                self.upload_count = self.upload_count + 1
+            self.i = self.i + 1
+            self.retry_limit = 3
         self.next_task()
 
     def handle_task_progress(self, i):
@@ -376,6 +385,14 @@ class UploadWorker(QtCore.QObject):
             self.handle_error(str(e))
         else:
             self.handle_error(m)
+
+    def handle_upload_error(self, err):
+        self.retry_limit = self.retry_limit - 1
+        if self.retry_limit <= 0:
+            self.handle_error(self, err)
+        else:
+            print "Upload of %s failed (retrying %d more times): %s" % (self.people[self.i], self.retry_limit, err)
+            self.current_task.abort()
 
     def handle_error(self, err):
         if self.aborted:

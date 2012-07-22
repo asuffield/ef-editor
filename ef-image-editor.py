@@ -115,7 +115,7 @@ class ImageListItem(QtGui.QStandardItem):
         self.photo_updated(set(['init']))
 
     def photo_updated(self, origin):
-        if not origin - set(['CropFrame']):
+        if not origin - set(['CropFrame', 'load_failed']):
             return
         self.loading = False
         self.photo_load_retries = 0
@@ -133,7 +133,7 @@ class ImageListItem(QtGui.QStandardItem):
     def handle_photo_ready(self, id, image):
         self.loading = False
         self.emitDataChanged()
-        self.photo.update_load_failed(False)
+        self.photo.update_load_failed(False, origin='load_failed')
 
     def handle_photo_fail(self, id, error):
         self.loading = False
@@ -1203,7 +1203,7 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
 
     def photodownload_error(self, id, msg):
         photo = Photo.get(id=id)
-        photo.update_load_failed(True)
+        photo.update_load_failed(True, origin='load_failed')
 
 def setup():
     datadir = QtGui.QDesktopServices.storageLocation(QtGui.QDesktopServices.DataLocation)

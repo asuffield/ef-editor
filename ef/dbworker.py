@@ -267,13 +267,14 @@ class DBWorker(object):
 
         trans = self.conn.begin()
         try:
-            for table_name in data:
+            for table_name in ['person', 'photo', 'event', 'registration']:
                 print "Importing", table_name
                 table = self.tables[table_name]
                 if table_name == 'person':
                     for row in data[table_name]:
                         if not row.has_key('id'):
                             continue
+                        row.pop('current_photo_id', None)
                         q = select([table]).where(table.c.id == row['id'])
                         r = self.conn.execute(q).fetchone()
                     
@@ -285,6 +286,7 @@ class DBWorker(object):
                     for row in data[table_name]:
                         if not row.has_key('url'):
                             continue
+                        row.pop('id', None)
                         q = select([table]).where(table.c.url == row['url'])
                         r = self.conn.execute(q).fetchone()
 
@@ -294,7 +296,7 @@ class DBWorker(object):
                         else:
                             key = self.do_insert(table_name, row, set(['import']))
                             photo_id = key['id']
-                        self.do_merge_current_photo(r['person_id'], photo_id)
+                        self.do_merge_current_photo(row['person_id'], photo_id)
                 else:
                     for row in data[table_name]:
                         self.do_upsert(table_name, row, set(['import']))
@@ -332,7 +334,10 @@ class DBWorker(object):
             # No edit happened, so don't waste time writing it
             return
 
-        self.do_update('photo', new, set(['import']))
+        values = dict(old.items())
+        values.update(new)
+
+        self.do_update('photo', values, set(['import']))
 
     def do_merge_person(self, old, new):
         if new['last_checked_at'] > old['last_checked_at']:
