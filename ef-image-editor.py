@@ -12,6 +12,7 @@ import shutil
 import csv
 import multiprocessing
 from PyQt4 import QtCore, QtGui
+import ef
 from ef.ui.editor import Ui_ImageEdit
 from ef.ui.upload_wizard import Ui_UploadPeopleWizard
 from ef.db import Person, Photo, setup_session, Registration, Event, Batch, FetchedPhoto, stash_photo
@@ -296,6 +297,8 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
     def __init__(self, dbmanager, parent=None):
         super(QtGui.QWidget, self).__init__(parent)
         self.setupUi(self)
+
+        self.setWindowTitle('Image Editing v' + ef.__version__)
 
         self.settings = QtCore.QSettings()
 
