@@ -3,7 +3,7 @@ import ef
 import py2exe
 
 setup(
-    version = ef.__version__,,
+    version = ef.__version__,
     description = "Image editor for eventsforce",
     name = "ef-image-editor",
 
