@@ -13,16 +13,17 @@ class EFParser(HTMLParser):
     keys = None
     #data = []
     pos = None
+    records = 0
     current_string = None
     
     def handle_starttag(self, tag, attrs):
-
         if tag == 'tr':
             if self.keys is None:
                 self.keys = []
             else:
                 self.current_target = {}
                 self.pos = 0
+                self.records = self.records + 1
                 #self.data.append(self.current_target)
 
             #if len(self.data) % 1000 == 0:
@@ -35,7 +36,10 @@ class EFParser(HTMLParser):
                 i = self.pos
                 self.pos = self.pos + 1
                 def inserter(data):
-                    self.current_target[self.keys[i]] = data
+                    if i >= len(self.keys):
+                        raise ValueError('Eventsforce sent corrupted data in report, in record %d. Record so far: %s' % (self.records, self.current_target))
+                    j = self.keys[i]
+                    self.current_target[j] = data
                 self.current_inserter = inserter
             self.current_string = ''
 
@@ -86,31 +90,30 @@ class EFDelegateParser(EFParser):
             print "Confusing nonsense in person record", record
             return
 
-        if self.people.has_key(person_id):
-            person = self.people[person_id]
-        else:
-            person = self.people[person_id] = {'events': {}}
-            for key in person_fields:
-                if key in record:
-                    value = record.pop(key)
-                    # Suppress duplicates (take the first thing in the report), but prefer non-zero-length values
-                    if 0 == len(person.get(key, '')):
-                        person[key] = value
-            # Record changes size here, so must not be an iterator...
-            for key in record.keys():
-                if re.match(r'^Local Party', key):
-                    if record[key].strip() != '':
-                        person['Local Party'] = record[key]
-                    del record[key]
-            self.handle_person(person)
+        person = self.people.setdefault(person_id, {'events': {}})
+
+        for key in person_fields:
+            if key in record:
+                value = record.pop(key)
+                # Suppress duplicates (take the first thing in the report), but prefer non-zero-length values
+                if 0 == len(unicode(person.get(key, ''))):
+                    person[key] = value
+        # Record changes size here, so must not be an iterator...
+        for key in record.keys():
+            if re.match(r'^Local Party', key):
+                if record[key].strip() != '':
+                    person['Local Party'] = record[key]
+                del record[key]
+        self.handle_person(person)
 
         event_id = self.get_event(record)
         if event_id is None:
             return
         events = person['events']
-        event = events[event_id] = {}
+        event = events.setdefault(event_id, {})
         for key in event_fields:
-            if record.has_key(key):
+            # Take the first thing in the report, but prefer non-zero-length values
+            if record.has_key(key) and 0 == len(unicode(event.get(key, ''))):
                 event[key] = record[key]
 
         self.handle_registration(person, event_id)

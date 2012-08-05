@@ -65,6 +65,7 @@ class ReportTask(Task, NetFuncs):
         self.progress = progress
         self.event = event
         self.since = since
+        #self.f = open('output.tmp', 'w')
     
     def task(self):
         self.batch = Batch()
@@ -113,7 +114,9 @@ class ReportTask(Task, NetFuncs):
         yield self.wait(self.batch)
 
     def report_get_data(self):
-        self.parser.feed(self.report_op.result())
+        data = self.report_op.result()
+        #self.f.write(unicode(data).encode('utf-8'))
+        self.parser.feed(data)
 
     def handle_commit_progress(self, cur, max):
         self.progress.emit('Saving people', cur, max)
@@ -130,11 +133,11 @@ class PhotosTask(Task, NetFuncs):
     def task(self):
         self.db_tasks = []
 
-        login_strainer = SoupStrainer(['img'])
+        image_strainer = SoupStrainer(['img'])
 
         for i, person in enumerate(self.people):
             self.progress.emit('Finding photos', i, len(self.people))
-            soup = yield self.get('https://www.eventsforce.net/libdems/backend/home/codEditMain.csp?codReadOnly=1&personID=%d&curPage=1' % person.id, parse_only=login_strainer)
+            soup = yield self.get('https://www.eventsforce.net/libdems/backend/home/codEditMain.csp?codReadOnly=1&personID=%d&curPage=1' % person.id, parse_only=image_strainer)
             img = soup.find('img', title='Picture Profile')
             if img is not None:
                 url = QtCore.QUrl()
@@ -148,6 +151,29 @@ class PhotosTask(Task, NetFuncs):
     def handle_commit_progress(self, cur, max):
         self.progress.emit('Saving photo URLs', cur, max)
 
+class CategoryTask(Task, NetFuncs):
+    def __init__(self, progress, regs, batch):
+        Task.__init__(self)
+        NetFuncs.__init__(self)
+
+        self.progress = progress
+        self.regs = regs
+        self.batch = batch
+
+    def task(self):
+        category_strainer = SoupStrainer(['tr', 'td', 'img'])
+
+        for i, reg in enumerate(self.regs):
+            self.progress.emit('Finding missing registration categories', i, len(self.regs))
+            soup = yield self.get('https://www.eventsforce.net/libdems/backend/home/codEditMain.csp?codReadOnly=1&personID=%d&eventID=%d&curPage=1' % (reg.person_id, reg.event_id), parse_only=category_strainer)
+            img = soup.find('img', src=re.compile(r'.*/backend/tick.gif$'))
+            if img is not None:
+                img_td = img.find_parent('td')
+                category_td = img_td.find_previous_sibling('td')
+                category = category_td.string
+                if category is not None:
+                    reg.update_category(category.strip(), batch=self.batch)
+
 class FetchTask(TaskList):
     def __init__(self, fetch_event, fetch_since, fetch_photos, username, password, progress, batch):
         tasks = [LoginTask(username, password)]
@@ -156,6 +182,9 @@ class FetchTask(TaskList):
         if fetch_photos != 'none':
             people = Person.all_with_photos(fetch_photos)
             tasks.append(PhotosTask(progress, people, batch))
+        broken_registrations = Registration.by_category('')
+        if broken_registrations:
+            tasks.append(CategoryTask(progress, list(broken_registrations), batch))
         TaskList.__init__(self, tasks)
 
 class FetchPersonTask(TaskList):

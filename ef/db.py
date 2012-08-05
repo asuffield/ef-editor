@@ -523,16 +523,27 @@ class Registration(DBBase):
 
     categories = set()
     by_person_dict = {}
+    by_category_dict = {}
 
     def __init__(self, *args, **kwargs):
         DBBase.__init__(self, *args, **kwargs)
 
         Registration.categories.add(self.attendee_type)
         Registration.by_person(self.person_id).append(self)
+        Registration.by_category(self.attendee_type).add(self)
 
     @classmethod
     def by_person(self, person_id):
         return Registration.by_person_dict.setdefault(person_id, [])
+
+    @classmethod
+    def by_category(self, category):
+        return Registration.by_category_dict.setdefault(category, set())
+
+    def update_category(self, category, batch=None):
+        self.update({'attendee_type': category}, batch=batch)
+        Registration.by_category(self.attendee_type).discard(self)
+        Registration.by_category(category).add(self)
 
 class QueryWorker(QtCore.QObject):
     finished = QtCore.pyqtSignal()

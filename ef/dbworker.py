@@ -268,7 +268,7 @@ class DBWorker(object):
         trans = self.conn.begin()
         try:
             for table_name in ['person', 'photo', 'event', 'registration']:
-                print "Importing", table_name
+                #print "Importing", table_name
                 table = self.tables[table_name]
                 if table_name == 'person':
                     for row in data[table_name]:
