@@ -102,7 +102,10 @@ class Task(QtCore.QObject, Finishable):
     @QtCore.pyqtSlot()
     def start_task(self, *args, **kwargs):
         self.task_coro = self.task(*args, **kwargs)
-        self.continue_task(lambda: self.task_coro.next())
+        if self.task_coro is None:
+            self.task_finished.emit()
+        else:
+            self.continue_task(lambda: self.task_coro.next())
 
     def connect_coro(self):
         if self.is_connected or self.current is None:

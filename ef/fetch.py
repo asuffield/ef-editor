@@ -145,12 +145,6 @@ class PhotosTask(Task, NetFuncs):
                 fetched = FetchedPhoto(person, str(self.current.resolve_url(url).toEncoded()), self.batch)
                 self.db_tasks.append(fetched)
 
-        self.batch.finish()
-        self.batch.progress.connect(self.handle_commit_progress)
-
-    def handle_commit_progress(self, cur, max):
-        self.progress.emit('Saving photo URLs', cur, max)
-
 class CategoryTask(Task, NetFuncs):
     def __init__(self, progress, regs, batch):
         Task.__init__(self)
@@ -174,6 +168,21 @@ class CategoryTask(Task, NetFuncs):
                 if category is not None:
                     reg.update_category(category.strip(), batch=self.batch)
 
+class BatchFinishTask(Task):
+    def __init__(self, progress, batch):
+        Task.__init__(self)
+
+        self.progress = progress
+        self.batch = batch
+
+    def task(self):
+        self.batch.progress.connect(self.handle_commit_progress)
+        self.batch.finish()
+        return None
+
+    def handle_commit_progress(self, cur, max):
+        self.progress.emit('Saving fetched data', cur, max)
+
 class FetchTask(TaskList):
     def __init__(self, fetch_event, fetch_since, fetch_photos, username, password, progress, batch):
         tasks = [LoginTask(username, password)]
@@ -185,6 +194,7 @@ class FetchTask(TaskList):
         broken_registrations = Registration.by_category('')
         if broken_registrations:
             tasks.append(CategoryTask(progress, list(broken_registrations), batch))
+        tasks.append(BatchFinishTask(progress, batch))
         TaskList.__init__(self, tasks)
 
 class FetchPersonTask(TaskList):
