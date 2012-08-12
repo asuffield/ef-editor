@@ -16,12 +16,17 @@ class FilterProxyModel(QtGui.QSortFilterProxyModel):
         self.only_missing = False
         self.only_upload = False
         self.opinion = 'unsure'
+        self.DNU = 'any'
         self.police_status = 'any'
         self.event_id = None
         self.category = 'any'
 
     def set_opinion(self, opinion):
         self.opinion = opinion
+        self.invalidateFilter()
+
+    def set_DNU(self, DNU):
+        self.DNU = DNU
         self.invalidateFilter()
 
     def set_event_id(self, event_id):
@@ -88,6 +93,7 @@ class FilterProxyModel(QtGui.QSortFilterProxyModel):
 
     def is_row_ok(self, index):
         model = self.sourceModel()
+        person, photo = model.data(index, QtCore.Qt.UserRole+10).toPyObject()
 
         if self.id is not None:
             id, ok = model.data(index, QtCore.Qt.UserRole).toInt()
@@ -106,7 +112,6 @@ class FilterProxyModel(QtGui.QSortFilterProxyModel):
                     return False
 
         if self.only_upload:
-            person, photo = model.data(index, QtCore.Qt.UserRole+10).toPyObject()
             if not person_should_upload(person):
                 return False
 
@@ -117,6 +122,12 @@ class FilterProxyModel(QtGui.QSortFilterProxyModel):
         if self.opinion != 'any':
             opinion = model.data(index, QtCore.Qt.UserRole+2).toPyObject()
             if opinion is not None and opinion != self.opinion:
+                return False
+
+        if self.DNU != 'any':
+            if self.DNU == 'yes' and (photo is None or not photo.block_upload):
+                return False
+            if self.DNU == 'no' and photo is not None and photo.block_upload:
                 return False
 
         if self.police_status != 'any':

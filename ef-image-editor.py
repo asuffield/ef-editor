@@ -369,6 +369,7 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         self.person_model_proxy.modelReset.connect(self.handle_filter_count)
 
         self.filter_opinion.currentIndexChanged[str].connect(self.person_model_proxy.set_opinion)
+        self.filter_DNU.currentIndexChanged[str].connect(self.person_model_proxy.set_DNU)
         self.filter_event.currentIndexChanged[int].connect(self.handle_filter_event_changed)
         self.filter_category.currentIndexChanged[str].connect(self.person_model_proxy.set_category)
         self.filter_police.currentIndexChanged[str].connect(self.person_model_proxy.set_police_status)
@@ -1124,6 +1125,7 @@ class ImageEdit(QtGui.QMainWindow, Ui_ImageEdit):
         self.person_model_proxy.id = None
         self.person_model_proxy.name = ''
         self.filter_opinion.setCurrentIndex(3)
+        self.filter_DNU.setCurrentIndex(0)
         self.filter_category.setCurrentIndex(0)
         self.filter_police.setCurrentIndex(0)
         self.filter_by_size.setChecked(False)

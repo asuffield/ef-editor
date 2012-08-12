@@ -414,14 +414,14 @@
                     </item>
                    </widget>
                   </item>
-                  <item row="7" column="0">
+                  <item row="9" column="0">
                    <widget class="QLabel" name="label_12">
                     <property name="text">
                      <string>Matches</string>
                     </property>
                    </widget>
                   </item>
-                  <item row="7" column="1">
+                  <item row="9" column="1">
                    <widget class="QLabel" name="filter_match_count">
                     <property name="text">
                      <string/>
@@ -440,6 +440,36 @@
                     <property name="text">
                      <string>Only for upload</string>
                     </property>
+                   </widget>
+                  </item>
+                  <item row="8" column="0">
+                   <widget class="QLabel" name="label_20">
+                    <property name="text">
+                     <string>Do not
+upload</string>
+                    </property>
+                   </widget>
+                  </item>
+                  <item row="8" column="1">
+                   <widget class="QComboBox" name="filter_DNU">
+                    <property name="currentIndex">
+                     <number>0</number>
+                    </property>
+                    <item>
+                     <property name="text">
+                      <string>any</string>
+                     </property>
+                    </item>
+                    <item>
+                     <property name="text">
+                      <string>yes</string>
+                     </property>
+                    </item>
+                    <item>
+                     <property name="text">
+                      <string>no</string>
+                     </property>
+                    </item>
                    </widget>
                   </item>
                  </layout>

@@ -1,14 +1,12 @@
 High priority bugs
 ------------------
-Detect errors when login details wrong
- - or other badness in eventsforce interactions?
- - when errors occur during photo uploading that we know are "just retry, EF sucks", retry them
-
 Suppress exception popups when one is already on screen
 
 Lock database so only one can be open
 
-Fetch 'missing or bad' photos doesn't fetch photos for which we have URLs but which do not work. Change this.
+We need to detect when a person is cancelled. This requires us to know
+what event we're working on. Make this a program-global state, rather
+than just a filter. Lots of things make more sense that way around.
 
 High priority features
 ----------------------
