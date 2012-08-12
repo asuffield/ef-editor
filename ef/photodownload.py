@@ -26,7 +26,7 @@ class PhotoDownload(Task, NetFuncs):
         # won't write complete junk (like an HTML error message) to
         # the cache
         buf = StringIO(str(self.data))
-        image = Image.open(buf)
+        image = Image.open(buf).convert('RGBA')
         width, height = image.size
         Photo.upsert({'id': self.id, 'width': width, 'height': height})
 

@@ -89,7 +89,7 @@ class UploadTask(Task, NetFuncs):
         self.completed.emit(not self.skipped, self.aborted)
 
     def handle_exception(self, e, msg):
-        self.error.emit(msg)
+        self.error.emit(str(msg))
 
     def extract_link_from_silly_button(self, button):
         m = re.match(r'document.location=\'(.*)\';', button['onclick'])
@@ -99,7 +99,7 @@ class UploadTask(Task, NetFuncs):
         return m.group(1)
 
     def prepare_file_upload(self, name, image):
-        filename = '%d_%s.jpg' % (self.person.id, self.person.fullname)
+        filename = '%d_%s.jpg' % (self.person.id, re.sub(r'[^A-Za-z0-9_]', r'_', self.person.fullname))
         filename = re.sub(r'[ #?/:]', '_', filename)
 
         data = StringIO()
@@ -134,6 +134,9 @@ class UploadTask(Task, NetFuncs):
         self.progress.emit(2)
 
         edit_button = soup.find('input', type='button', value='Edit')
+        if not edit_button:
+            self.error.emit("Could not find edit button on backend booking page for %s" % self.person)
+            return
         link = self.extract_link_from_silly_button(edit_button)
         if link is None:
             return
@@ -389,7 +392,7 @@ class UploadWorker(QtCore.QObject):
     def handle_upload_error(self, err):
         self.retry_limit = self.retry_limit - 1
         if self.retry_limit <= 0:
-            self.handle_error(self, err)
+            self.handle_error(err)
         else:
             print "Upload of %s failed (retrying %d more times): %s" % (self.people[self.i], self.retry_limit, err)
             self.current_task.abort()
