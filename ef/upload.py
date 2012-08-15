@@ -32,7 +32,6 @@ class UploadTask(Task, NetFuncs):
         self.batch = batch
         self.person = person
         self.photo = Photo.get(id=self.person.current_photo_id)
-        self.reply = None
         self.minimum_change = minimum_change
         self.skipped = False
         self.aborted = False
@@ -148,6 +147,7 @@ class UploadTask(Task, NetFuncs):
         while limit > 0 and not soup.find_all(['h1', 'h2', 'h3', 'h4'], text=re.compile(r'\s*Photo Upload\s*')):
             if not soup.form:
                 self.error.emit("Could not find form on registration pages (while looking for photo upload)")
+                return
             soup = yield self.submit_form(soup.form)
             error = soup.find('script', text=re.compile(r".*alert\('Error", re.S|re.I))
             if error:
@@ -156,8 +156,10 @@ class UploadTask(Task, NetFuncs):
                     msg = m.group(1)
                     msg = msg.replace(r'\r', '\r').replace(r'\n', '\n')
                     self.error.emit("Error from eventsforce: %s" % msg)
+                    return
                 else:
                     self.error.emit("Eventsforce generated an error, but it couldn't be recognised. Please try the web interface to see what's going on.")
+                    return
             limit = limit - 1
 
         if limit == 0:
@@ -165,6 +167,7 @@ class UploadTask(Task, NetFuncs):
             #f.write(str(soup))
             #f.close()
             self.error.emit("Failed to find photo upload on registration pages")
+            return
 
         self.progress.emit(4)
 
@@ -196,7 +199,7 @@ class UploadTask(Task, NetFuncs):
 
         soup = yield self.submit_form(soup.form, {'uploadFile': '1', 'uploadTempPersonID': temp_person_id, 'uploadGuestNumber': guest_number, 'uploadDataID': data_id})
         self.progress.emit(6)
-        soup = yield self.submit_form(soup.form, {}, self.prepare_file_upload('FileStream', image))
+        soup = yield self.submit_form(soup.form, {}, file=self.prepare_file_upload('FileStream', image))
         self.progress.emit(7)
 
         for script in soup.find_all('script'):
@@ -204,8 +207,8 @@ class UploadTask(Task, NetFuncs):
             if m:
                 break
         if not m:
-            #print soup
             self.error.emit("Could not process photo upload (failed to find javascript refresh)")
+            return
         link = m.group(1)
 
         if re.search(r'File could not be saved', link):
@@ -242,17 +245,20 @@ class UploadTask(Task, NetFuncs):
         while limit > 0 and not re.search(r'Booking details', soup.find_all('h1')[1].text.strip(), re.I):
             if not soup.form:
                 self.error.emit("Could not find form on registration pages (while looking for final booking details page)")
-            soup = yield self.submit_form(soup.form)
+                erturn
+            soup = yield self.submit_form(soup.form, default_fields={re.compile('^radQuestion_111_'): 'Green Pack'})
             limit = limit - 1
 
         if limit == 0:
             self.error.emit("Failed to reach end of registration pages after uploading photo")
+            return
 
         self.progress.emit(11)
 
         final_proceed_button = soup.find('input', type='button', onclick=re.compile(r'gotoReceipt'))
         if not final_proceed_button:
             self.error.emit("Could not find final SAVE button")
+            return
         link = self.extract_link_from_silly_button(final_proceed_button)
         soup = yield self.get(link)
 
@@ -266,6 +272,7 @@ class UploadTask(Task, NetFuncs):
 
         if not re.search(r'Booking confirmation', soup.find_all('h1')[1].text, re.I):
             self.error.emit('Final page after upload did not look right, did something bad happen?')
+            return
 
         new_opinion = None
         if self.photo.opinion == 'ok':
@@ -311,7 +318,6 @@ class UploadWorker(QtCore.QObject):
         super(QtCore.QObject, self).__init__()
 
         self.tasks = None
-        self.reply = None
 
     @QtCore.pyqtSlot(dict, str, str)
     @catcherror

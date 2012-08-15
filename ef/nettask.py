@@ -129,8 +129,9 @@ class NetFuncs(object):
         parse_only = kwargs.pop('parse_only', None)
         return self._net_op(lambda url, *args, **kwargs: HTMLOp(qt_form_post(url, *args, **kwargs), timeout=timeout, parse_only=parse_only), url, *args, **kwargs)
 
-    def submit_form(self, form, user_fields={}, file=None, timeout=30, parse_only=None):
+    def submit_form(self, form, user_fields={}, file=None, timeout=30, parse_only=None, default_fields={}):
         fields = {}
+        fields_seen = set()
         action = form['action']
 
         for input in form.find_all('input'):
@@ -140,6 +141,7 @@ class NetFuncs(object):
             if input.has_key('disabled'):
                 print "Skipping disabled select", name
                 continue
+            fields_seen.add(name)
             type = input['type'].lower()
             if type == 'image':
                 fields['%s.x' % name] = '1'
@@ -165,9 +167,17 @@ class NetFuncs(object):
             if select.has_key('disabled'):
                 print "Skipping disabled select", name
                 continue
+            fields_seen.add(name)
             selected = filter(lambda o: o.has_key('selected'), select.find_all('option'))
             if len(selected):
                 fields[name] = selected[0]['value']
+
+        fields_missed = fields_seen - set(fields.keys())
+
+        for rexp in default_fields:
+            for name in fields_missed:
+                if rexp.match(name):
+                    fields[name] = default_fields[rexp]
 
         # Hideous eventsforce hack: they do this field-disabling mess in javascript
         for script in form.find_all('script'):

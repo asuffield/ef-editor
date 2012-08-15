@@ -8,6 +8,10 @@ We need to detect when a person is cancelled. This requires us to know
 what event we're working on. Make this a program-global state, rather
 than just a filter. Lots of things make more sense that way around.
 
+Improve fetcher reliability - detect photos which aren't found, for
+whatever reason
+
+
 High priority features
 ----------------------
 use pyinstaller instead of py2exe
@@ -29,3 +33,11 @@ Fix abuses of super() by getting rid of them. super() is insane
 Purge habitual getters/setters
 
 Multiple simultaneous uploads, for speed? Downloads? Priority of those?
+
+Better workflow: main window a timeline of previous/current/next,
+buttons to move back/forward more prominent, search as a thing you can
+open.
+
+Batch upload, report at the end on errors, don't stop after one error
+
+Button to abort current fetch/upload process
