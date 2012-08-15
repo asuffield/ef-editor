@@ -435,7 +435,7 @@ class Photo(DBBase):
 
     def update_block_upload(self, state, origin=''):
         self.update({'id': self.id,
-                     'block_upload': state,
+                     'block_upload': bool(state),
                      'date_edited': time.time(),
                      }, origin)
 
