@@ -144,7 +144,9 @@ class UploadTask(Task, NetFuncs):
         self.progress.emit(3)
 
         limit = 20
-        while limit > 0 and not soup.find_all(['h1', 'h2', 'h3', 'h4'], text=re.compile(r'\s*Photo Upload\s*')):
+        while limit > 0 and not soup.find_all(['h1', 'h2', 'h3', 'h4'], text=re.compile(r'.*(Conference Pass Photo|Photo Upload).*')):
+            #with open('tmp%d.html' % limit, 'w') as f:
+            #    f.write(str(soup))
             if not soup.form:
                 self.error.emit("Could not find form on registration pages (while looking for photo upload)")
                 return
