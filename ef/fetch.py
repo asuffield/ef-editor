@@ -5,7 +5,7 @@ import traceback
 import time
 import re
 from ef.login import LoginTask, LoginError
-from ef.nettask import NetFuncs
+from ef.nettask import NetFuncs, NetworkError
 from ef.task import Task, TaskList
 from bs4 import SoupStrainer
 
@@ -122,22 +122,32 @@ class ReportTask(Task, NetFuncs):
         self.progress.emit('Saving people', cur, max)
 
 class PhotosTask(Task, NetFuncs):
-    def __init__(self, progress, people, batch):
+    def __init__(self, progress, fetch_photos, batch):
         Task.__init__(self)
         NetFuncs.__init__(self)
 
         self.progress = progress
-        self.people = people
+        self.fetch_photos = fetch_photos
         self.batch = batch
 
     def task(self):
         self.db_tasks = []
 
+        self.people = Person.all_with_photos(self.fetch_photos)
+
         image_strainer = SoupStrainer(['img'])
 
         for i, person in enumerate(self.people):
             self.progress.emit('Finding photos', i, len(self.people))
-            soup = yield self.get('https://www.eventsforce.net/libdems/backend/home/codEditMain.csp?codReadOnly=1&personID=%d&curPage=1' % person.id, parse_only=image_strainer)
+            for retry in reversed(xrange(3)):
+                try:
+                    soup = yield self.get('https://www.eventsforce.net/libdems/backend/home/codEditMain.csp?codReadOnly=1&personID=%d&curPage=1' % person.id, parse_only=image_strainer)
+                    break
+                except NetworkError, e:
+                    if retry == 0:
+                        raise
+                    continue
+
             img = soup.find('img', title='Picture Profile')
             if img is not None:
                 url = QtCore.QUrl()
@@ -159,7 +169,15 @@ class CategoryTask(Task, NetFuncs):
 
         for i, reg in enumerate(self.regs):
             self.progress.emit('Finding missing registration categories', i, len(self.regs))
-            soup = yield self.get('https://www.eventsforce.net/libdems/backend/home/codEditMain.csp?codReadOnly=1&personID=%d&eventID=%d&curPage=1' % (reg.person_id, reg.event_id), parse_only=category_strainer)
+            for retry in reversed(xrange(3)):
+                try:
+                    soup = yield self.get('https://www.eventsforce.net/libdems/backend/home/codEditMain.csp?codReadOnly=1&personID=%d&eventID=%d&curPage=1' % (reg.person_id, reg.event_id), parse_only=category_strainer)
+                    break
+                except NetworkError, e:
+                    if retry == 0:
+                        raise
+                    continue
+
             img = soup.find('img', src=re.compile(r'.*/backend/tick.gif$'))
             if img is not None:
                 img_td = img.find_parent('td')
@@ -189,8 +207,7 @@ class FetchTask(TaskList):
         if fetch_event:
             tasks.append(ReportTask(fetch_event, fetch_since, progress))
         if fetch_photos != 'none':
-            people = Person.all_with_photos(fetch_photos)
-            tasks.append(PhotosTask(progress, people, batch))
+            tasks.append(PhotosTask(progress, fetch_photos, batch))
         broken_registrations = Registration.by_category('')
         if broken_registrations:
             tasks.append(CategoryTask(progress, list(broken_registrations), batch))
