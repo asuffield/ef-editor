@@ -133,7 +133,10 @@ class PhotosTask(Task, NetFuncs):
     def task(self):
         self.db_tasks = []
 
-        self.people = Person.all_with_photos(self.fetch_photos)
+        if isinstance(self.fetch_photos, list):
+            self.people = self.fetch_photos
+        else:
+            self.people = Person.all_with_photos(self.fetch_photos)
 
         image_strainer = SoupStrainer(['img'])
 
