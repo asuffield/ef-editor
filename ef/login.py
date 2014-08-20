@@ -22,9 +22,9 @@ class LoginTask(Task, NetFuncs):
         self.password = password
 
     def task(self):
-        soup = yield self.get('https://www.eventsforce.net/libdems/backend/home/login.csp', parse_only=SoupStrainer('form'))
+        soup = yield self.get('https://www.eventsforce.net/libdems/backend/home/login.csp', parse_only=SoupStrainer(['form']))
 
-        login_strainer = SoupStrainer(['script', 'title', 'span'])
+        login_strainer = SoupStrainer(['script', 'title', 'span', 'a'])
 
         soup = yield self.submit_form(soup.form, {'txtUsername': self.username, 'txtPassword': self.password}, parse_only=login_strainer)
 
@@ -41,5 +41,7 @@ class LoginTask(Task, NetFuncs):
             raise LoginError('Invalid logon')
         if soup.title is None:
             raise LoginError('Got incomprehensible page from eventsforce after login')
-        if soup.title.text != 'Liberal Democrats':
+        if soup.title.text != 'Eventsforce':
             raise LoginError('Got unexpected page title "%s" from eventsforce after login' % soup.title.text)
+        if soup.find('a', id='ef_menu_button_logout') is None:
+            raise LoginError('Did not see logout button on page after logging in')
