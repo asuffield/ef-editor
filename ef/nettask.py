@@ -188,11 +188,11 @@ class NetFuncs(object):
                 child_field = m.group(1)
                 parent_field = m.group(2)
                 parent_value = m.group(3)
-                if fields.has_key(parent_field) and fields.has_key(child_field):
-                    if fields[parent_field] != parent_value:
+                if fields.has_key(child_field):
+                    if not fields.has_key(parent_field) or fields[parent_field] != parent_value:
                         del fields[child_field]
 
         fields.update(user_fields)
-        #print fields
+        #print [action, fields]
 
         return self.post(action, fields, file, timeout=timeout, parse_only=parse_only)

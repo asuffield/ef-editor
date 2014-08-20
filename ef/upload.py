@@ -144,7 +144,7 @@ class UploadTask(Task, NetFuncs):
         self.progress.emit(3)
 
         limit = 20
-        while limit > 0 and not soup.find_all(['h1', 'h2', 'h3', 'h4'], text=re.compile(r'.*(Conference Pass Photo|Photo Upload).*')):
+        while limit > 0 and not soup.find_all(['h1', 'h2', 'h3', 'h4', 'td'], text=re.compile(r'.*(Conference Pass Photo|Photo Upload).*')):
             #with open('tmp%d.html' % limit, 'w') as f:
             #    f.write(str(soup))
             if not soup.form:
@@ -244,7 +244,9 @@ class UploadTask(Task, NetFuncs):
         new_photo_url = str(self.current.resolve_url(href_url).toEncoded())
 
         limit = 20
-        while limit > 0 and not re.search(r'Booking details', soup.find_all('h1')[1].text.strip(), re.I):
+        while limit > 0 and soup.find('input', type='button', onclick=re.compile(r'gotoReceipt')) is None:
+            with open('tmp%d.html' % limit, 'w') as f:
+                f.write(str(soup))
             if not soup.form:
                 self.error.emit("Could not find form on registration pages (while looking for final booking details page)")
                 erturn
@@ -272,7 +274,7 @@ class UploadTask(Task, NetFuncs):
 
         self.progress.emit(13)
 
-        if not re.search(r'Booking confirmation', soup.find_all('h1')[1].text, re.I):
+        if soup.find(text=re.compile('Thank you for your registration')) is None:
             self.error.emit('Final page after upload did not look right, did something bad happen?')
             return
 
