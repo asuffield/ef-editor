@@ -24,7 +24,7 @@
     <item>
      <widget class="QStackedWidget" name="main_stack">
       <property name="currentIndex">
-       <number>2</number>
+       <number>1</number>
       </property>
       <widget class="QWidget" name="loading_stack">
        <layout class="QVBoxLayout" name="verticalLayout_11">
@@ -121,6 +121,9 @@
             <widget class="QLabel" name="login_error">
              <property name="text">
               <string/>
+             </property>
+             <property name="wordWrap">
+              <bool>true</bool>
              </property>
             </widget>
            </item>
@@ -321,7 +324,7 @@
                    <x>0</x>
                    <y>0</y>
                    <width>313</width>
-                   <height>383</height>
+                   <height>285</height>
                   </rect>
                  </property>
                  <layout class="QFormLayout" name="formLayout_2">
@@ -937,8 +940,8 @@ upload</string>
                     <rect>
                      <x>0</x>
                      <y>0</y>
-                     <width>325</width>
-                     <height>438</height>
+                     <width>296</width>
+                     <height>355</height>
                     </rect>
                    </property>
                    <layout class="QVBoxLayout" name="verticalLayout_8">
