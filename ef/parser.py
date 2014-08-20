@@ -99,7 +99,7 @@ class EFDelegateParser(EFParser):
                 if 0 == len(unicode(person.get(key, ''))):
                     person[key] = value
         # Record changes size here, so must not be an iterator...
-        for key in record.keys():
+        for key in list(record.keys()):
             if re.match(r'^Local Party', key):
                 if record[key].strip() != '':
                     person['Local Party'] = record[key]
