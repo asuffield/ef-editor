@@ -53,7 +53,8 @@ class UploadTask(Task, NetFuncs):
                 # Just skip images that haven't been downloaded, we
                 # couldn't possibly want to upload something we
                 # haven't looked at
-                self.completed.emit(False)
+                self.skipped = True
+                self.complete()
                 return
             raise
 
@@ -74,7 +75,7 @@ class UploadTask(Task, NetFuncs):
         if self.photo.url and self.photo.rotate == 0 and (100 * abs(1 - size_change)) < self.minimum_change:
             # This photo hasn't changed enough so we'll skip it
             self.skipped = True
-            self.completed.emit(False)
+            self.complete()
             return
 
         # Start the process of uploading the edited image to eventsforce
@@ -245,11 +246,14 @@ class UploadTask(Task, NetFuncs):
 
         limit = 20
         while limit > 0 and soup.find('input', type='button', onclick=re.compile(r'gotoReceipt')) is None:
+            if soup.find('input', type='button', onclick=re.compile(r'processWorldPay')) is not None:
+                self.error.emit("User requires payment, cannot save")
+                return
             with open('tmp%d.html' % limit, 'w') as f:
                 f.write(str(soup))
             if not soup.form:
                 self.error.emit("Could not find form on registration pages (while looking for final booking details page)")
-                erturn
+                return
             soup = yield self.submit_form(soup.form, default_fields={re.compile('^radQuestion_111_'): 'Green Pack'})
             limit = limit - 1
 
