@@ -249,8 +249,8 @@ class UploadTask(Task, NetFuncs):
             if soup.find('input', type='button', onclick=re.compile(r'processWorldPay')) is not None:
                 self.error.emit("User requires payment, cannot save")
                 return
-            with open('tmp%d.html' % limit, 'w') as f:
-                f.write(str(soup))
+            #with open('tmp%d.html' % limit, 'w') as f:
+            #    f.write(str(soup))
             if not soup.form:
                 self.error.emit("Could not find form on registration pages (while looking for final booking details page)")
                 return
