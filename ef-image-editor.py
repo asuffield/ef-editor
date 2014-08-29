@@ -1215,6 +1215,7 @@ def setup():
     dir = QtCore.QDir()
     if not dir.exists(datadir):
         dir.mkpath(datadir)
+    sys.stderr = open(os.path.join(unicode(datadir), 'ef-image-editor.log'), 'a')
     dbmanager = setup_session(unicode(datadir))
     start_network_manager()
     return dbmanager
@@ -1226,8 +1227,14 @@ if __name__ == "__main__":
     QtCore.QCoreApplication.setApplicationName('ef-image-editor')
     app = QtGui.QApplication(sys.argv)
     dbmanager = setup()
-    myapp = ImageEdit(dbmanager)
-    myapp.show()
-    rc = app.exec_()
-    dbmanager.shutdown()
-    sys.exit(rc)
+    try:
+        myapp = ImageEdit(dbmanager)
+        myapp.show()
+        rc = app.exec_()
+        sys.exit(rc)
+    except Exception as e:
+        message = traceback.format_exc()
+        print >>sys.stderr, message
+        QtGui.QMessageBox.information(self, "Unhandled exception", message)
+    finally:
+        dbmanager.shutdown()
