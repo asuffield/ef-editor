@@ -410,6 +410,7 @@ class UploadWorker(QtCore.QObject):
         else:
             print "Upload of %s failed (retrying %d more times): %s" % (self.people[self.i], self.retry_limit, err)
             self.current_task.abort()
+            self.next_task()
 
     def handle_error(self, err):
         if self.aborted:
